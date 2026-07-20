@@ -1,0 +1,194 @@
+<?php
+
+use App\Http\Controllers\Api\V1\Admin\AuditLogController;
+use App\Http\Controllers\Api\V1\Admin\BroadcastController;
+use App\Http\Controllers\Api\V1\Admin\BusinessController as AdminBusinessController;
+use App\Http\Controllers\Api\V1\Admin\CmsController;
+use App\Http\Controllers\Api\V1\Admin\CustomerController as AdminCustomerController;
+use App\Http\Controllers\Api\V1\Admin\DashboardController as AdminDashboardController;
+use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
+use App\Http\Controllers\Api\V1\Admin\OfferController as AdminOfferController;
+use App\Http\Controllers\Api\V1\Admin\PlanController as AdminPlanController;
+use App\Http\Controllers\Api\V1\Admin\ReportController;
+use App\Http\Controllers\Api\V1\Admin\ReviewController as AdminReviewController;
+use App\Http\Controllers\Api\V1\Admin\SettingController;
+use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\Business\AnalyticsController;
+use App\Http\Controllers\Api\V1\Business\BusinessController;
+use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
+use App\Http\Controllers\Api\V1\Business\OfferController;
+use App\Http\Controllers\Api\V1\Business\QrController;
+use App\Http\Controllers\Api\V1\Business\RedemptionController;
+use App\Http\Controllers\Api\V1\Business\SubscriptionController;
+use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\PlanController;
+use App\Http\Controllers\Api\V1\DeviceTokenController;
+use App\Http\Controllers\Api\V1\FavoriteController;
+use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\PublicBusinessController;
+use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\V1\SpinnerController;
+use App\Http\Controllers\Api\V1\WalletController;
+use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| API Routes (versioned)
+|--------------------------------------------------------------------------
+| All endpoints live under /api/v1 so future versions can coexist
+| (document/phase/11 §API Base URL). Feature route groups are added in
+| their respective milestones.
+*/
+
+Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
+    // Public
+    Route::get('health', [HealthController::class, 'index'])->name('health');
+    Route::get('categories', [CategoryController::class, 'index'])->name('categories.index');
+    Route::get('plans', [PlanController::class, 'index'])->name('plans.index');
+    Route::get('businesses', [PublicBusinessController::class, 'index'])->name('businesses.index');
+    Route::get('businesses/{slug}', [PublicBusinessController::class, 'show'])->name('businesses.show');
+    Route::get('businesses/{slug}/reviews', [ReviewController::class, 'index'])->name('businesses.reviews');
+
+    // Auth (document/phase/12 §Firebase Login Flow)
+    Route::prefix('auth')->group(function (): void {
+        Route::post('google', [AuthController::class, 'google'])
+            ->middleware('throttle:10,1')
+            ->name('auth.google');
+
+        // Mobile/email + PIN sign-in (owners & admins) — document login change.
+        Route::post('pin-login', [AuthController::class, 'pinLogin'])
+            ->middleware('throttle:10,1')
+            ->name('auth.pin-login');
+
+        // Public business-owner sign-up (mobile + PIN).
+        Route::post('register-owner', [AuthController::class, 'registerOwner'])
+            ->middleware('throttle:10,1')
+            ->name('auth.register-owner');
+
+        // Local-only helper for verifying the app without Firebase creds.
+        if (! App::environment('production')) {
+            Route::post('dev-login', [AuthController::class, 'devLogin'])
+                ->middleware('throttle:20,1')
+                ->name('auth.dev-login');
+        }
+
+        Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+            Route::get('me', [AuthController::class, 'me'])->name('auth.me');
+            Route::post('logout', [AuthController::class, 'logout'])->name('auth.logout');
+        });
+    });
+
+    // Customer spin + wallet (document/phase/11 §Spinner / Wallet Endpoints)
+    Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+        Route::post('spinner/spin', [SpinnerController::class, 'spin'])
+            ->middleware('throttle:30,1')
+            ->name('spinner.spin');
+
+        Route::get('wallet', [WalletController::class, 'index'])->name('wallet.index');
+        Route::get('wallet/rewards', [WalletController::class, 'rewards'])->name('wallet.rewards');
+
+        // Favorites + reviews (document/phase/11 §Favorites / Reviews)
+        Route::get('favorites', [FavoriteController::class, 'index'])->name('favorites.index');
+        Route::post('favorites', [FavoriteController::class, 'store'])->name('favorites.store');
+        Route::delete('favorites/{slug}', [FavoriteController::class, 'destroy'])->name('favorites.destroy');
+
+        Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
+        Route::delete('reviews/{uuid}', [ReviewController::class, 'destroy'])->name('reviews.destroy');
+
+        // Notifications (document/phase/11 §Notifications, phase/13 §Push).
+        // Literal paths declared before the {uuid} wildcard so they win.
+        Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+        Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount'])->name('notifications.unread');
+        Route::patch('notifications/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+        Route::post('notifications/device-token', [DeviceTokenController::class, 'store'])->name('notifications.device.store');
+        Route::delete('notifications/device-token', [DeviceTokenController::class, 'destroy'])->name('notifications.device.destroy');
+        Route::delete('notifications/{uuid}', [NotificationController::class, 'destroy'])->name('notifications.destroy');
+    });
+
+    // Business owner (document/phase/07, phase/11 §Business Owner Endpoints)
+    Route::middleware(['auth:sanctum', 'active', 'role:business_owner'])
+        ->prefix('business')
+        ->name('business.')
+        ->group(function (): void {
+            Route::post('/', [BusinessController::class, 'store'])->name('store');
+            Route::get('profile', [BusinessController::class, 'show'])->name('profile.show');
+            Route::put('profile', [BusinessController::class, 'update'])->name('profile.update');
+            Route::get('dashboard', [BusinessController::class, 'dashboard'])->name('dashboard');
+
+            // Analytics (document/phase/07 §Analytics, Milestone 12)
+            Route::get('analytics', [AnalyticsController::class, 'index'])->name('analytics');
+
+            // Subscription & billing (document/phase/14, Milestone 13)
+            Route::get('subscription', [SubscriptionController::class, 'index'])->name('subscription.show');
+            Route::post('subscription', [SubscriptionController::class, 'store'])->name('subscription.store');
+            Route::post('subscription/cancel', [SubscriptionController::class, 'cancel'])->name('subscription.cancel');
+            Route::get('invoices', [SubscriptionController::class, 'invoices'])->name('invoices');
+
+            Route::post('gallery', [BusinessGalleryController::class, 'store'])->name('gallery.store');
+            Route::delete('gallery/{uuid}', [BusinessGalleryController::class, 'destroy'])->name('gallery.destroy');
+
+            Route::get('qr', [QrController::class, 'show'])->name('qr.show');
+            Route::post('qr/download', [QrController::class, 'download'])->name('qr.download');
+
+            // Offers (document/phase/11 §Offer Endpoints)
+            Route::get('offers', [OfferController::class, 'index'])->name('offers.index');
+            Route::post('offers', [OfferController::class, 'store'])->name('offers.store');
+            Route::put('offers/{uuid}', [OfferController::class, 'update'])->name('offers.update');
+            Route::delete('offers/{uuid}', [OfferController::class, 'destroy'])->name('offers.destroy');
+            Route::patch('offers/{uuid}/status', [OfferController::class, 'status'])->name('offers.status');
+
+            // Redemption (document/phase/11 §Redemption)
+            Route::post('redeem/verify', [RedemptionController::class, 'verify'])->name('redeem.verify');
+            Route::post('redeem', [RedemptionController::class, 'redeem'])->name('redeem');
+            Route::get('redemptions', [RedemptionController::class, 'history'])->name('redemptions');
+        });
+
+    // Super Admin panel (document/phase/14, Milestone 14)
+    Route::middleware(['auth:sanctum', 'active', 'role:admin'])
+        ->prefix('admin')
+        ->name('admin.')
+        ->group(function (): void {
+            Route::get('dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
+            Route::get('fraud', [AdminDashboardController::class, 'fraud'])->name('fraud');
+
+            // Business management
+            Route::get('businesses', [AdminBusinessController::class, 'index'])->name('businesses.index');
+            Route::get('businesses/{uuid}', [AdminBusinessController::class, 'show'])->name('businesses.show');
+            Route::patch('businesses/{uuid}/status', [AdminBusinessController::class, 'updateStatus'])->name('businesses.status');
+            Route::patch('businesses/{uuid}/verify', [AdminBusinessController::class, 'verify'])->name('businesses.verify');
+            Route::patch('businesses/{uuid}/feature', [AdminBusinessController::class, 'feature'])->name('businesses.feature');
+
+            // Customer management
+            Route::get('customers', [AdminCustomerController::class, 'index'])->name('customers.index');
+            Route::get('customers/{uuid}', [AdminCustomerController::class, 'show'])->name('customers.show');
+            Route::patch('customers/{uuid}/status', [AdminCustomerController::class, 'updateStatus'])->name('customers.status');
+
+            // Offer oversight + review moderation
+            Route::get('offers', [AdminOfferController::class, 'index'])->name('offers.index');
+            Route::patch('offers/{uuid}/status', [AdminOfferController::class, 'updateStatus'])->name('offers.status');
+            Route::get('reviews', [AdminReviewController::class, 'index'])->name('reviews.index');
+            Route::patch('reviews/{uuid}/status', [AdminReviewController::class, 'updateStatus'])->name('reviews.status');
+
+            // Plans & subscriptions
+            Route::get('plans', [AdminPlanController::class, 'index'])->name('plans.index');
+            Route::patch('plans/{key}', [AdminPlanController::class, 'update'])->name('plans.update');
+
+            // Broadcast notifications
+            Route::post('broadcast', [BroadcastController::class, 'store'])->name('broadcast');
+
+            // Feature flags + platform settings + CMS
+            Route::get('feature-flags', [FeatureFlagController::class, 'index'])->name('flags.index');
+            Route::patch('feature-flags/{key}', [FeatureFlagController::class, 'update'])->name('flags.update');
+            Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
+            Route::put('settings', [SettingController::class, 'update'])->name('settings.update');
+            Route::get('cms', [CmsController::class, 'index'])->name('cms.index');
+            Route::get('cms/{slug}', [CmsController::class, 'show'])->name('cms.show');
+            Route::put('cms/{slug}', [CmsController::class, 'update'])->name('cms.update');
+
+            // Audit logs + report exports
+            Route::get('audit-logs', [AuditLogController::class, 'index'])->name('audit');
+            Route::get('reports/{type}', [ReportController::class, 'export'])->name('reports.export');
+        });
+});

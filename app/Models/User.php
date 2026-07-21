@@ -133,4 +133,16 @@ class User extends Authenticatable
     {
         return $this->hasMany(DeviceToken::class);
     }
+
+    /** Listee Coins ledger entries for this customer. @return HasMany<WalletTransaction, $this> */
+    public function walletTransactions(): HasMany
+    {
+        return $this->hasMany(WalletTransaction::class);
+    }
+
+    /** Current Listee Coins balance = sum of all ledger entries (never denormalized). */
+    public function coinBalance(): int
+    {
+        return (int) $this->walletTransactions()->sum('amount');
+    }
 }

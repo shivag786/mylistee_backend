@@ -58,9 +58,10 @@ class AuthController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120'],
-            'mobile' => ['required', 'string', 'max:20', 'unique:users,phone'],
+            'mobile' => ['required', 'string', 'digits:10', 'unique:users,phone'],
             'pin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/'],
         ], [
+            'mobile.digits' => 'Enter a valid 10-digit mobile number.',
             'mobile.unique' => 'An account with this mobile number already exists. Please sign in.',
             'pin.regex' => 'Your PIN must be digits only.',
         ]);
@@ -75,6 +76,21 @@ class AuthController extends Controller
             data: $this->sessionPayload($session),
             message: 'Account created.',
             status: 201,
+        );
+    }
+
+    /**
+     * Upgrade the signed-in customer into a business owner so they can list a
+     * business without a separate account. POST /api/v1/auth/become-owner
+     * (auth:sanctum + active). Scoped to the caller — no token change needed.
+     */
+    public function becomeOwner(Request $request): JsonResponse
+    {
+        $user = $this->auth->becomeOwner($request->user());
+
+        return ApiResponse::success(
+            data: new UserResource($user),
+            message: 'You can now list your business.',
         );
     }
 

@@ -145,6 +145,50 @@ class AuthTest extends TestCase
         $this->assertSame(0, $user->fresh()->tokens()->count());
     }
 
+    public function test_customer_can_become_a_business_owner(): void
+    {
+        $customer = User::factory()->create(['role' => UserRole::Customer]);
+        $token = $customer->createToken('api')->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/v1/auth/become-owner')
+            ->assertOk()
+            ->assertJsonPath('data.role', 'business_owner');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $customer->id,
+            'role' => UserRole::BusinessOwner->value,
+        ]);
+    }
+
+    public function test_become_owner_is_idempotent_for_an_existing_owner(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::BusinessOwner]);
+        $token = $owner->createToken('api')->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/v1/auth/become-owner')
+            ->assertOk()
+            ->assertJsonPath('data.role', 'business_owner');
+    }
+
+    public function test_become_owner_will_not_downgrade_an_admin(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $token = $admin->createToken('api')->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/v1/auth/become-owner')
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $admin->id,
+            'role' => UserRole::Admin->value,
+        ]);
+    }
+
+    public function test_become_owner_requires_authentication(): void
+    {
+        $this->postJson('/api/v1/auth/become-owner')->assertStatus(401);
+    }
+
     public function test_dev_login_creates_a_user_in_local_environment(): void
     {
         $response = $this->postJson('/api/v1/auth/dev-login', [

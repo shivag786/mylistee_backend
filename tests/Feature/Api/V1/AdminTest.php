@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\V1;
 
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Jobs\SendBroadcastNotification;
 use App\Models\Business;
 use App\Models\Review;
 use App\Models\User;
@@ -11,6 +12,7 @@ use Database\Seeders\CmsPageSeeder;
 use Database\Seeders\FeatureFlagSeeder;
 use Database\Seeders\PlanSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AdminTest extends TestCase
@@ -133,6 +135,28 @@ class AdminTest extends TestCase
             ->assertJsonPath('data.sent', 3);
 
         $this->assertDatabaseCount('notifications', 3);
+    }
+
+    public function test_broadcast_is_queued_not_sent_synchronously(): void
+    {
+        Queue::fake();
+        User::factory()->count(2)->create(['role' => UserRole::Customer]);
+        User::factory()->count(3)->create(['role' => UserRole::BusinessOwner]);
+
+        $this->withToken($this->token($this->admin()))
+            ->postJson('/api/v1/admin/broadcast', [
+                'title' => 'Platform update',
+                'target' => 'all',
+            ])
+            ->assertOk()
+            // 2 customers + 3 owners + the admin sender = 6 active users.
+            ->assertJsonPath('data.sent', 6);
+
+        // The request returned without doing the fan-out — the job carries it.
+        $this->assertDatabaseCount('notifications', 0);
+        Queue::assertPushed(SendBroadcastNotification::class, function ($job) {
+            return $job->target === 'all' && $job->title === 'Platform update';
+        });
     }
 
     public function test_admin_can_toggle_a_feature_flag(): void

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CoinSource;
 use App\Models\Business;
 use App\Models\Review;
 use App\Models\User;
@@ -12,6 +13,8 @@ use App\Models\User;
  */
 class ReviewService
 {
+    public function __construct(private readonly LoyaltyService $loyalty) {}
+
     /** Create or update the customer's review for a business. */
     public function upsert(User $user, Business $business, int $rating, ?string $comment): Review
     {
@@ -22,6 +25,12 @@ class ReviewService
 
         $business->recalculateRating();
 
+        // Reward the first review a customer leaves for this business (editing it
+        // later doesn't re-earn).
+        if ($review->wasRecentlyCreated) {
+            $this->loyalty->awardOnce($user, CoinSource::Review, $business, ['reference' => $review]);
+        }
+
         return $review->fresh('customer');
     }
 
@@ -30,5 +39,18 @@ class ReviewService
         $business = $review->business;
         $review->delete();
         $business?->recalculateRating();
+    }
+
+    /** Owner's public reply to a customer review (empty reply clears it). */
+    public function ownerReply(Review $review, ?string $reply): Review
+    {
+        $reply = $reply !== null ? trim($reply) : null;
+
+        $review->update([
+            'reply' => $reply ?: null,
+            'replied_at' => $reply ? now() : null,
+        ]);
+
+        return $review->fresh('customer');
     }
 }

@@ -37,6 +37,7 @@ class SpinnerController extends Controller
         return ApiResponse::success([
             'reward' => new RewardResource($result['reward']->load('business')),
             'offer' => new PublicOfferResource($result['offer']),
+            'coinsEarned' => $result['coinsEarned'],
         ], 'Congratulations! You won a reward.');
     }
 }

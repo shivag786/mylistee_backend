@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Storage;
 use Kreait\Firebase\Contract\Auth as FirebaseAuth;
 use Kreait\Firebase\Contract\Messaging as FirebaseMessaging;
 use Kreait\Firebase\Factory;
@@ -23,11 +22,20 @@ class FirebaseService
 
     private ?FirebaseMessaging $messaging = null;
 
+    /**
+     * Absolute path to the service-account JSON. Resolved against storage/app
+     * (as documented) — not the `local` disk, whose root moved to
+     * storage/app/private in Laravel 11+.
+     */
+    private function credentialsPath(): string
+    {
+        return storage_path('app/'.ltrim((string) config('firebase.credentials'), '/'));
+    }
+
     /** True when a Firebase service account JSON is available on disk. */
     public function isConfigured(): bool
     {
-        return is_string(config('firebase.credentials'))
-            && Storage::disk('local')->exists((string) config('firebase.credentials'));
+        return is_string(config('firebase.credentials')) && is_file($this->credentialsPath());
     }
 
     /** Resolve (and cache) the Firebase Auth client, or null if unconfigured. */
@@ -38,8 +46,7 @@ class FirebaseService
         }
 
         if ($this->auth === null) {
-            $path = Storage::disk('local')->path((string) config('firebase.credentials'));
-            $this->auth = (new Factory())->withServiceAccount($path)->createAuth();
+            $this->auth = (new Factory())->withServiceAccount($this->credentialsPath())->createAuth();
         }
 
         return $this->auth;
@@ -76,8 +83,7 @@ class FirebaseService
         }
 
         if ($this->messaging === null) {
-            $path = Storage::disk('local')->path((string) config('firebase.credentials'));
-            $this->messaging = (new Factory())->withServiceAccount($path)->createMessaging();
+            $this->messaging = (new Factory())->withServiceAccount($this->credentialsPath())->createMessaging();
         }
 
         return $this->messaging;

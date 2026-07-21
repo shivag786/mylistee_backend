@@ -50,6 +50,23 @@ class PinLoginTest extends TestCase
             ->assertJsonValidationErrors(['pin']);
     }
 
+    public function test_pin_login_locks_out_after_repeated_failures(): void
+    {
+        User::factory()->create(['phone' => '9000000002', 'pin' => '1234']);
+
+        // Five wrong attempts are each rejected as invalid credentials.
+        for ($i = 0; $i < 5; $i++) {
+            $this->postJson('/api/v1/auth/pin-login', ['identifier' => '9000000002', 'pin' => '0000'])
+                ->assertStatus(422);
+        }
+
+        // The sixth is locked out — even with the correct PIN.
+        $response = $this->postJson('/api/v1/auth/pin-login', ['identifier' => '9000000002', 'pin' => '1234'])
+            ->assertStatus(422);
+
+        $this->assertStringContainsString('Too many attempts', $response->json('errors.pin.0'));
+    }
+
     public function test_pin_login_rejects_an_account_without_a_pin(): void
     {
         // Customers (Google-only) have no PIN set.

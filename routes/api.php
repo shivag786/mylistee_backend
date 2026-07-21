@@ -16,9 +16,11 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Business\AnalyticsController;
 use App\Http\Controllers\Api\V1\Business\BusinessController;
 use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
+use App\Http\Controllers\Api\V1\Business\LoyaltyController;
 use App\Http\Controllers\Api\V1\Business\OfferController;
 use App\Http\Controllers\Api\V1\Business\QrController;
 use App\Http\Controllers\Api\V1\Business\RedemptionController;
+use App\Http\Controllers\Api\V1\Business\ReviewController as OwnerReviewController;
 use App\Http\Controllers\Api\V1\Business\SubscriptionController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\PlanController;
@@ -28,6 +30,7 @@ use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\V1\LoyaltyController as CustomerLoyaltyController;
 use App\Http\Controllers\Api\V1\SpinnerController;
 use App\Http\Controllers\Api\V1\WalletController;
 use Illuminate\Support\Facades\App;
@@ -77,6 +80,11 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
             Route::get('me', [AuthController::class, 'me'])->name('auth.me');
             Route::post('logout', [AuthController::class, 'logout'])->name('auth.logout');
+
+            // Customer → owner self-upgrade ("list your business").
+            Route::post('become-owner', [AuthController::class, 'becomeOwner'])
+                ->middleware('throttle:10,1')
+                ->name('auth.become-owner');
         });
     });
 
@@ -88,6 +96,14 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
         Route::get('wallet', [WalletController::class, 'index'])->name('wallet.index');
         Route::get('wallet/rewards', [WalletController::class, 'rewards'])->name('wallet.rewards');
+
+        // Listee Coins — balance, history, and spending on reward tiers (Phase 2)
+        Route::get('wallet/coins', [WalletController::class, 'coins'])->name('wallet.coins');
+        Route::get('wallet/coins/transactions', [WalletController::class, 'coinTransactions'])->name('wallet.coins.transactions');
+        Route::get('businesses/{slug}/loyalty', [CustomerLoyaltyController::class, 'show'])->name('businesses.loyalty');
+        Route::post('loyalty/redeem', [CustomerLoyaltyController::class, 'redeem'])
+            ->middleware('throttle:30,1')
+            ->name('loyalty.redeem');
 
         // Favorites + reviews (document/phase/11 §Favorites / Reviews)
         Route::get('favorites', [FavoriteController::class, 'index'])->name('favorites.index');
@@ -133,6 +149,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('qr/download', [QrController::class, 'download'])->name('qr.download');
 
             // Offers (document/phase/11 §Offer Endpoints)
+            Route::get('offers/suggestions', [OfferController::class, 'suggestions'])->name('offers.suggestions');
             Route::get('offers', [OfferController::class, 'index'])->name('offers.index');
             Route::post('offers', [OfferController::class, 'store'])->name('offers.store');
             Route::put('offers/{uuid}', [OfferController::class, 'update'])->name('offers.update');
@@ -143,6 +160,17 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('redeem/verify', [RedemptionController::class, 'verify'])->name('redeem.verify');
             Route::post('redeem', [RedemptionController::class, 'redeem'])->name('redeem');
             Route::get('redemptions', [RedemptionController::class, 'history'])->name('redemptions');
+
+            // Reviews — owner reads & replies (Phase 1)
+            Route::get('reviews', [OwnerReviewController::class, 'index'])->name('reviews.index');
+            Route::post('reviews/{uuid}/reply', [OwnerReviewController::class, 'reply'])->name('reviews.reply');
+
+            // Loyalty (Listee Coins) config — earn rates + reward tiers (Phase 2)
+            Route::get('loyalty', [LoyaltyController::class, 'show'])->name('loyalty.show');
+            Route::put('loyalty', [LoyaltyController::class, 'update'])->name('loyalty.update');
+            Route::post('loyalty/rewards', [LoyaltyController::class, 'storeReward'])->name('loyalty.rewards.store');
+            Route::put('loyalty/rewards/{uuid}', [LoyaltyController::class, 'updateReward'])->name('loyalty.rewards.update');
+            Route::delete('loyalty/rewards/{uuid}', [LoyaltyController::class, 'destroyReward'])->name('loyalty.rewards.destroy');
         });
 
     // Super Admin panel (document/phase/14, Milestone 14)

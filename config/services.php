@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    // Claude (Anthropic) — powers AI offer suggestions (Phase 2). Optional:
+    // when the key is absent the suggestions engine degrades to templates +
+    // analytics nudges (no AI), so the feature never hard-fails in dev.
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-opus-4-8'),
+    ],
+
 ];

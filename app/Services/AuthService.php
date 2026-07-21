@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\CoinSource;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -17,7 +19,10 @@ use Illuminate\Validation\ValidationException;
  */
 class AuthService
 {
-    public function __construct(private readonly FirebaseService $firebase) {}
+    public function __construct(
+        private readonly FirebaseService $firebase,
+        private readonly LoyaltyService $loyalty,
+    ) {}
 
     /**
      * Exchange a verified Firebase ID token for a local session.
@@ -54,17 +59,44 @@ class AuthService
      */
     public function loginWithPin(string $identifier, string $pin): array
     {
+        // Per-account lockout: 5 failed attempts locks that identifier for 15
+        // minutes (brute-force protection — flagged in SECURITY_AUDIT.md).
+        $key = 'pin-login:'.mb_strtolower(trim($identifier));
+
+        if (RateLimiter::tooManyAttempts($key, self::PIN_MAX_ATTEMPTS)) {
+            throw ValidationException::withMessages([
+                'pin' => [$this->lockoutMessage(RateLimiter::availableIn($key))],
+            ]);
+        }
+
         $user = User::where('phone', $identifier)
             ->orWhere('email', $identifier)
             ->first();
 
         if ($user === null || $user->pin === null || ! Hash::check($pin, $user->pin)) {
+            RateLimiter::hit($key, self::PIN_DECAY_SECONDS);
+
             throw ValidationException::withMessages([
                 'pin' => ['Invalid mobile number or PIN.'],
             ]);
         }
 
+        RateLimiter::clear($key);
+
         return $this->issueSession($user);
+    }
+
+    private const PIN_MAX_ATTEMPTS = 5;
+
+    private const PIN_DECAY_SECONDS = 900;
+
+    private function lockoutMessage(int $seconds): string
+    {
+        $minutes = (int) ceil($seconds / 60);
+
+        return $minutes > 1
+            ? "Too many attempts. Please try again in {$minutes} minutes."
+            : 'Too many attempts. Please try again in a minute.';
     }
 
     /**
@@ -87,6 +119,28 @@ class AuthService
         ]);
 
         return $this->issueSession($user);
+    }
+
+    /**
+     * Upgrade the authenticated customer into a business owner so they can list a
+     * business without creating a separate PIN account (document/phase/07 §Owner
+     * Onboarding). Self-service and scoped to the caller: it only ever mutates the
+     * passed-in user, and only a `customer` may upgrade — an admin is never
+     * silently downgraded, and an existing owner is a no-op (idempotent).
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\HttpException when the role is not upgradeable
+     */
+    public function becomeOwner(User $user): User
+    {
+        if ($user->role === UserRole::BusinessOwner) {
+            return $user; // already an owner — nothing to do
+        }
+
+        abort_if($user->role !== UserRole::Customer, 403, 'This account cannot be converted to a business owner.');
+
+        $user->forceFill(['role' => UserRole::BusinessOwner])->save();
+
+        return $user;
     }
 
     /**
@@ -170,6 +224,11 @@ class AuthService
         abort_if(! $user->isActive(), 403, 'Your account has been suspended.');
 
         $user->forceFill(['last_login_at' => now()])->save();
+
+        // One-time welcome coins for customers, granted on their first session.
+        if ($user->role === UserRole::Customer) {
+            $this->loyalty->awardOnce($user, CoinSource::Welcome);
+        }
 
         $token = $user->createToken('api')->plainTextToken;
 

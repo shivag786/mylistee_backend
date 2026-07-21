@@ -29,6 +29,9 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <!-- Keep tests hermetic: never treat a real service account on disk as
+             configured, so notifications degrade to in-app only (no FCM calls). -->
+        <env name="FIREBASE_CREDENTIALS" value="firebase/testing-no-credentials.json"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

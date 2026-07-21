@@ -75,6 +75,25 @@ class SpinnerTest extends TestCase
         $this->assertSame(1, $business->fresh()->total_spins);
     }
 
+    public function test_spinning_awards_listee_coins(): void
+    {
+        config()->set('loyalty.earn.spin', 10);
+        $customer = $this->customer();
+        $business = $this->businessWithOffers();
+
+        $this->withToken($this->token($customer))
+            ->postJson('/api/v1/spinner/spin', ['businessSlug' => $business->slug])
+            ->assertOk();
+
+        $this->assertDatabaseHas('wallet_transactions', [
+            'user_id' => $customer->id,
+            'business_id' => $business->id,
+            'source' => 'spin',
+            'amount' => 10,
+        ]);
+        $this->assertSame(10, $customer->coinBalance());
+    }
+
     public function test_spin_is_limited_to_once_per_business_per_day(): void
     {
         $customer = $this->customer();

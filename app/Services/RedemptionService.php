@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CoinSource;
 use App\Enums\NotificationType;
 use App\Enums\RewardStatus;
 use App\Models\Business;
@@ -20,7 +21,10 @@ use Illuminate\Validation\ValidationException;
  */
 class RedemptionService
 {
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly LoyaltyService $loyalty,
+    ) {}
 
     /**
      * Look up a reward by code for this business and assert it is redeemable.
@@ -62,7 +66,7 @@ class RedemptionService
      */
     public function redeem(Business $business, string $code, User $redeemer): Reward
     {
-        return DB::transaction(function () use ($business, $code, $redeemer): Reward {
+        $reward = DB::transaction(function () use ($business, $code, $redeemer): Reward {
             $reward = $business->rewards()
                 ->where('code', strtoupper(trim($code)))
                 ->lockForUpdate()
@@ -98,6 +102,11 @@ class RedemptionService
                 "Your reward \"{$prize}\" was redeemed at {$business->name}.",
                 ['link' => '/wallet'],
             );
+
+            // Bonus coins for completing a redemption at the counter.
+            $this->loyalty->award($reward->customer, CoinSource::Redeem, $business, [
+                'reference' => $reward,
+            ]);
         }
 
         return $reward;

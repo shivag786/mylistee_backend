@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\BusinessStatus;
+use App\Enums\CoinSource;
 use App\Enums\NotificationType;
 use App\Enums\RewardStatus;
 use App\Models\Business;
@@ -26,7 +27,10 @@ class SpinnerService
     /** Free-plan spin allowance (phase/02 §Spin Limit). */
     public const SPINS_PER_DAY = 1;
 
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly LoyaltyService $loyalty,
+    ) {}
 
     /** Has this customer already used today's spin at this business? */
     public function hasSpunToday(User $customer, Business $business): bool
@@ -48,7 +52,7 @@ class SpinnerService
      * Perform a spin and award a reward.
      *
      * @param  array{ip?: string|null, device?: string|null}  $meta
-     * @return array{reward: Reward, offer: Offer, spin: Spin}
+     * @return array{reward: Reward, offer: Offer, spin: Spin, coinsEarned: int}
      *
      * @throws ValidationException
      */
@@ -108,6 +112,12 @@ class SpinnerService
 
             return ['reward' => $reward, 'offer' => $offer, 'spin' => $spin];
         });
+
+        // Award Listee Coins for the spin (best-effort — never blocks the win).
+        $coins = $this->loyalty->award($customer, CoinSource::Spin, $business, [
+            'reference' => $result['reward'],
+        ]);
+        $result['coinsEarned'] = $coins?->amount ?? 0;
 
         $this->notifyAfterSpin($customer, $business, $result['reward']);
 

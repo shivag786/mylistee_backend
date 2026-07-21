@@ -23,6 +23,7 @@ class ReviewResource extends JsonResource
             'rating' => $this->rating,
             'comment' => $this->comment,
             'reply' => $this->reply,
+            'repliedAt' => $this->replied_at?->toIso8601String(),
             'customerName' => $this->customer?->name,
             'isMine' => $currentUser !== null && $currentUser->id === $this->customer_id,
             'createdAt' => $this->created_at?->toIso8601String(),

@@ -35,8 +35,9 @@ class UpdateBusinessRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:32'],
             'email' => ['nullable', 'email', 'max:255'],
             'website' => ['nullable', 'url', 'max:255'],
-            'facebook' => ['nullable', 'url', 'max:255'],
-            'instagram' => ['nullable', 'url', 'max:255'],
+            // Social links accept any handle or URL — no strict URL validation.
+            'facebook' => ['nullable', 'string', 'max:255'],
+            'instagram' => ['nullable', 'string', 'max:255'],
             'whatsapp' => ['nullable', 'string', 'max:32'],
             'gst' => ['nullable', 'string', 'max:32'],
             'logo' => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:4096'],

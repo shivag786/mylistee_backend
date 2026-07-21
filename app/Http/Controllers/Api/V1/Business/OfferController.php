@@ -9,6 +9,7 @@ use App\Http\Requests\Api\V1\Business\UpdateOfferRequest;
 use App\Http\Resources\OfferResource;
 use App\Models\Offer;
 use App\Services\OfferService;
+use App\Services\OfferSuggestionService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +21,21 @@ use Illuminate\Validation\Rule;
  */
 class OfferController extends Controller
 {
-    public function __construct(private readonly OfferService $offers) {}
+    public function __construct(
+        private readonly OfferService $offers,
+        private readonly OfferSuggestionService $suggestions,
+    ) {}
+
+    /** GET /business/offers/suggestions — offer ideas (templates + analytics + AI). */
+    public function suggestions(Request $request): JsonResponse
+    {
+        $business = $request->user()->business();
+        if ($business === null) {
+            return ApiResponse::error('No business found for this account.', status: 404);
+        }
+
+        return ApiResponse::success($this->suggestions->forBusiness($business), 'Offer suggestions.');
+    }
 
     /** GET /business/offers */
     public function index(Request $request): JsonResponse

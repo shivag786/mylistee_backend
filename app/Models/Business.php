@@ -130,6 +130,18 @@ class Business extends Model
         return $this->hasMany(BusinessVisit::class);
     }
 
+    /** Per-business loyalty configuration (null earn rates fall back to config). @return HasOne<LoyaltyProgram, $this> */
+    public function loyaltyProgram(): HasOne
+    {
+        return $this->hasOne(LoyaltyProgram::class);
+    }
+
+    /** Reward tiers customers can spend coins on. @return HasMany<LoyaltyReward, $this> */
+    public function loyaltyRewards(): HasMany
+    {
+        return $this->hasMany(LoyaltyReward::class)->orderBy('sort_order')->orderBy('coins_cost');
+    }
+
     /** @return HasMany<Subscription, $this> */
     public function subscriptions(): HasMany
     {

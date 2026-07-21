@@ -2,25 +2,21 @@
 
 namespace App\Http\Controllers\Api\V1\Admin;
 
-use App\Enums\NotificationType;
-use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Jobs\SendBroadcastNotification;
 use App\Services\AuditService;
-use App\Services\NotificationService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Broadcast notifications (document/phase/14 §Notification Center). Sends an
- * in-app notification (+ best-effort push) to a target audience. Chunked so a
- * large audience doesn't exhaust memory.
+ * Broadcast notifications (document/phase/14 §Notification Center). Queues an
+ * in-app notification (+ best-effort push) to a target audience. The fan-out
+ * runs on a queued job (chunked) so a large broadcast never blocks the request.
  */
 class BroadcastController extends Controller
 {
     public function __construct(
-        private readonly NotificationService $notifications,
         private readonly AuditService $audit,
     ) {}
 
@@ -35,38 +31,29 @@ class BroadcastController extends Controller
         ]);
 
         $data = ! empty($validated['link']) ? ['link' => $validated['link']] : [];
-        $sent = 0;
 
-        $this->audienceQuery($validated['target'])->chunkById(200, function ($users) use ($validated, $data, &$sent): void {
-            foreach ($users as $user) {
-                $this->notifications->notify(
-                    $user,
-                    NotificationType::System,
-                    $validated['title'],
-                    $validated['body'] ?? null,
-                    $data,
-                );
-                $sent++;
-            }
-        });
+        // Count the audience up front so the admin sees how many will be reached;
+        // the actual delivery is handed to the queue.
+        $recipients = SendBroadcastNotification::audienceQuery($validated['target'])->count();
+
+        SendBroadcastNotification::dispatch(
+            $validated['target'],
+            $validated['title'],
+            $validated['body'] ?? null,
+            $data,
+        );
 
         $this->audit->log(
             $request->user(),
             'broadcast.send',
             null,
-            "Broadcast to {$validated['target']} ({$sent} recipients)",
-            ['target' => $validated['target'], 'sent' => $sent, 'title' => $validated['title']],
+            "Broadcast to {$validated['target']} ({$recipients} recipients)",
+            ['target' => $validated['target'], 'sent' => $recipients, 'title' => $validated['title']],
         );
 
-        return ApiResponse::success(['sent' => $sent], "Broadcast sent to {$sent} recipients.");
-    }
-
-    /** @return \Illuminate\Database\Eloquent\Builder<User> */
-    private function audienceQuery(string $target)
-    {
-        return User::query()
-            ->where('status', 'active')
-            ->when($target === 'customers', fn ($q) => $q->where('role', UserRole::Customer->value))
-            ->when($target === 'owners', fn ($q) => $q->where('role', UserRole::BusinessOwner->value));
+        return ApiResponse::success(
+            ['sent' => $recipients],
+            "Broadcast queued for {$recipients} recipients.",
+        );
     }
 }

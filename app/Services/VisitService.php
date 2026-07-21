@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CoinSource;
 use App\Models\Business;
 use App\Models\BusinessVisit;
 use App\Models\User;
@@ -17,6 +18,8 @@ class VisitService
 {
     /** De-dupe window: repeat opens by the same visitor inside this don't re-count. */
     private const DEDUPE_MINUTES = 30;
+
+    public function __construct(private readonly LoyaltyService $loyalty) {}
 
     /**
      * Record a profile visit. Best-effort: never let logging break the page load.
@@ -49,6 +52,20 @@ class VisitService
         ]);
 
         $business->increment('total_visits');
+
+        // Reward a signed-in customer: a one-time bonus the first time they open
+        // this shop, otherwise a once-a-day check-in for coming back.
+        if ($customer !== null) {
+            $firstScan = $this->loyalty->awardOnce($customer, CoinSource::FirstScan, $business, [
+                'reference' => $visit,
+            ]);
+
+            if ($firstScan === null) {
+                $this->loyalty->awardOncePerDay($customer, CoinSource::Checkin, $business, [
+                    'reference' => $visit,
+                ]);
+            }
+        }
 
         return $visit;
     }

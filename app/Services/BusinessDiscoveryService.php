@@ -46,6 +46,16 @@ class BusinessDiscoveryService
             $query->whereHas('category', fn ($c) => $c->where('slug', $filters['category']));
         }
 
+        // Recommended row: admin-verified shops only.
+        if (! empty($filters['verified'])) {
+            $query->where('verified', true);
+        }
+
+        // New-shops row: onboarded within the last 14 days.
+        if (! empty($filters['new'])) {
+            $query->where('created_at', '>=', now()->subDays(14));
+        }
+
         $favoriteIds = $user
             ? $user->favorites()->pluck('business_id')->all()
             : [];

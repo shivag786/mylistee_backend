@@ -1,0 +1,37 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
+
+/**
+ * A customer's rotating wallet token (Phase 7.3).
+ */
+class CustomerToken extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'token',
+        'expires_at',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'expires_at' => 'datetime',
+        ];
+    }
+
+    /** @return BelongsTo<User, $this> */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function isExpired(?Carbon $now = null): bool
+    {
+        return ($now ?? Carbon::now())->gte($this->expires_at);
+    }
+}

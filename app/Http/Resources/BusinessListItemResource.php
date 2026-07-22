@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\BusinessStatus;
 use App\Models\Business;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -34,6 +35,11 @@ class BusinessListItemResource extends JsonResource
             'distanceMeters' => $this->getAttribute('distance_meters'),
             'isOpen' => $this->isOpenNow(),
             'isFavorite' => (bool) $this->getAttribute('is_favorite'),
+            'verified' => (bool) $this->verified,
+            // Spinnable now: active shop with at least one live offer to award.
+            'spinAvailable' => $this->status === BusinessStatus::Active && (int) ($this->offer_count ?? 0) > 0,
+            // Recently onboarded (last 14 days) — powers the "New" badge/row.
+            'isNew' => $this->created_at !== null && $this->created_at->gt(now()->subDays(14)),
             'status' => $this->status->value,
         ];
     }

@@ -11,3 +11,6 @@ Artisan::command('inspire', function () {
 // Scheduled tasks (Milestone 18). Requires one cron entry on the server:
 //   * * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1
 Schedule::command('app:maintenance')->dailyAt('03:00')->withoutOverlapping();
+
+// Promotion engine auto start/stop (Phase 7.2b, 07A event-driven automation).
+Schedule::command('promotions:tick')->everyMinute()->withoutOverlapping();

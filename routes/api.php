@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\BroadcastController;
 use App\Http\Controllers\Api\V1\Admin\BusinessController as AdminBusinessController;
+use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\V1\Admin\CategoryRequestController as AdminCategoryRequestController;
 use App\Http\Controllers\Api\V1\Admin\CmsController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController as AdminCustomerController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController as AdminDashboardController;
@@ -16,8 +18,14 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Business\AnalyticsController;
 use App\Http\Controllers\Api\V1\Business\BusinessController;
 use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
+use App\Http\Controllers\Api\V1\Business\CategoryRequestController as OwnerCategoryRequestController;
+use App\Http\Controllers\Api\V1\Business\ComboController;
+use App\Http\Controllers\Api\V1\Business\TokenLookupController;
 use App\Http\Controllers\Api\V1\Business\LoyaltyController;
 use App\Http\Controllers\Api\V1\Business\OfferController;
+use App\Http\Controllers\Api\V1\Business\ProductCategoryController;
+use App\Http\Controllers\Api\V1\Business\ProductController;
+use App\Http\Controllers\Api\V1\Business\PromotionController;
 use App\Http\Controllers\Api\V1\Business\QrController;
 use App\Http\Controllers\Api\V1\Business\RedemptionController;
 use App\Http\Controllers\Api\V1\Business\ReviewController as OwnerReviewController;
@@ -30,6 +38,7 @@ use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\V1\WalletTokenController;
 use App\Http\Controllers\Api\V1\LoyaltyController as CustomerLoyaltyController;
 use App\Http\Controllers\Api\V1\SpinnerController;
 use App\Http\Controllers\Api\V1\WalletController;
@@ -97,6 +106,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::get('wallet', [WalletController::class, 'index'])->name('wallet.index');
         Route::get('wallet/rewards', [WalletController::class, 'rewards'])->name('wallet.rewards');
 
+        // Rotating wallet token (Phase 7.3) — literal before any wildcard wallet route.
+        Route::get('wallet/token', [WalletTokenController::class, 'show'])->name('wallet.token');
+        Route::post('wallet/token/refresh', [WalletTokenController::class, 'refresh'])->name('wallet.token.refresh');
+
         // Listee Coins — balance, history, and spending on reward tiers (Phase 2)
         Route::get('wallet/coins', [WalletController::class, 'coins'])->name('wallet.coins');
         Route::get('wallet/coins/transactions', [WalletController::class, 'coinTransactions'])->name('wallet.coins.transactions');
@@ -145,6 +158,45 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('gallery', [BusinessGalleryController::class, 'store'])->name('gallery.store');
             Route::delete('gallery/{uuid}', [BusinessGalleryController::class, 'destroy'])->name('gallery.destroy');
 
+            // Category requests — owner asks admin to add a missing category (Phase 7.1)
+            Route::get('category-requests', [OwnerCategoryRequestController::class, 'index'])->name('category-requests.index');
+            Route::post('category-requests', [OwnerCategoryRequestController::class, 'store'])->name('category-requests.store');
+
+            // Menu sections (Phase 7.2) — declare literal `reorder` before {uuid}
+            Route::get('product-categories', [ProductCategoryController::class, 'index'])->name('product-categories.index');
+            Route::post('product-categories', [ProductCategoryController::class, 'store'])->name('product-categories.store');
+            Route::patch('product-categories/reorder', [ProductCategoryController::class, 'reorder'])->name('product-categories.reorder');
+            Route::put('product-categories/{uuid}', [ProductCategoryController::class, 'update'])->name('product-categories.update');
+            Route::delete('product-categories/{uuid}', [ProductCategoryController::class, 'destroy'])->name('product-categories.destroy');
+
+            // Products (Phase 7.2)
+            Route::get('products', [ProductController::class, 'index'])->name('products.index');
+            Route::post('products', [ProductController::class, 'store'])->name('products.store');
+            Route::patch('products/reorder', [ProductController::class, 'reorder'])->name('products.reorder');
+            Route::post('products/{uuid}', [ProductController::class, 'update'])->name('products.update'); // POST + _method for multipart
+            Route::put('products/{uuid}', [ProductController::class, 'update']);
+            Route::delete('products/{uuid}', [ProductController::class, 'destroy'])->name('products.destroy');
+            Route::patch('products/{uuid}/toggle', [ProductController::class, 'toggle'])->name('products.toggle');
+            Route::post('products/{uuid}/images', [ProductController::class, 'addImage'])->name('products.images.store');
+            Route::delete('products/{uuid}/images/{imageUuid}', [ProductController::class, 'removeImage'])->name('products.images.destroy');
+
+            // Combos (Phase 7.3)
+            Route::get('combos', [ComboController::class, 'index'])->name('combos.index');
+            Route::post('combos', [ComboController::class, 'store'])->name('combos.store');
+            Route::post('combos/{uuid}', [ComboController::class, 'update'])->name('combos.update'); // POST + _method for multipart
+            Route::put('combos/{uuid}', [ComboController::class, 'update']);
+            Route::delete('combos/{uuid}', [ComboController::class, 'destroy'])->name('combos.destroy');
+
+            // Customer wallet-token lookup at the counter (Phase 7.3)
+            Route::post('token/lookup', [TokenLookupController::class, 'lookup'])->name('token.lookup');
+
+            // Promotions — "Grow Sales" engine (Phase 7.2b)
+            Route::get('promotions', [PromotionController::class, 'index'])->name('promotions.index');
+            Route::post('promotions', [PromotionController::class, 'store'])->name('promotions.store');
+            Route::put('promotions/{uuid}', [PromotionController::class, 'update'])->name('promotions.update');
+            Route::patch('promotions/{uuid}/status', [PromotionController::class, 'status'])->name('promotions.status');
+            Route::delete('promotions/{uuid}', [PromotionController::class, 'destroy'])->name('promotions.destroy');
+
             Route::get('qr', [QrController::class, 'show'])->name('qr.show');
             Route::post('qr/download', [QrController::class, 'download'])->name('qr.download');
 
@@ -187,6 +239,19 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('businesses/{uuid}/status', [AdminBusinessController::class, 'updateStatus'])->name('businesses.status');
             Route::patch('businesses/{uuid}/verify', [AdminBusinessController::class, 'verify'])->name('businesses.verify');
             Route::patch('businesses/{uuid}/feature', [AdminBusinessController::class, 'feature'])->name('businesses.feature');
+
+            // Master category management (Phase 7.1)
+            Route::get('categories', [AdminCategoryController::class, 'index'])->name('categories.index');
+            Route::post('categories', [AdminCategoryController::class, 'store'])->name('categories.store');
+            Route::patch('categories/reorder', [AdminCategoryController::class, 'reorder'])->name('categories.reorder');
+            Route::post('categories/{uuid}', [AdminCategoryController::class, 'update'])->name('categories.update'); // POST + _method for multipart
+            Route::put('categories/{uuid}', [AdminCategoryController::class, 'update']);
+            Route::delete('categories/{uuid}', [AdminCategoryController::class, 'destroy'])->name('categories.destroy');
+
+            // Owner category requests moderation (Phase 7.1)
+            Route::get('category-requests', [AdminCategoryRequestController::class, 'index'])->name('category-requests.index');
+            Route::patch('category-requests/{uuid}/approve', [AdminCategoryRequestController::class, 'approve'])->name('category-requests.approve');
+            Route::patch('category-requests/{uuid}/reject', [AdminCategoryRequestController::class, 'reject'])->name('category-requests.reject');
 
             // Customer management
             Route::get('customers', [AdminCustomerController::class, 'index'])->name('customers.index');

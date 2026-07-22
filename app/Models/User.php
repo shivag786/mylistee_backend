@@ -104,6 +104,12 @@ class User extends Authenticatable
         return $this->businesses()->latest('id')->first();
     }
 
+    /** Rotating wallet tokens (Phase 7.3). @return HasMany<CustomerToken, $this> */
+    public function customerTokens(): HasMany
+    {
+        return $this->hasMany(CustomerToken::class);
+    }
+
     /** @return HasMany<Reward, $this> */
     public function rewards(): HasMany
     {

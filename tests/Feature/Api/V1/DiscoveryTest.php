@@ -64,6 +64,51 @@ class DiscoveryTest extends TestCase
             ->assertJsonPath('data.0.offerCount', 2);
     }
 
+    public function test_listing_exposes_verified_spin_and_new_flags(): void
+    {
+        $business = Business::factory()->create(['verified' => true]);
+        Offer::factory()->create(['business_id' => $business->id]); // live offer → spinnable
+
+        $this->getJson('/api/v1/businesses')
+            ->assertOk()
+            ->assertJsonPath('data.0.verified', true)
+            ->assertJsonPath('data.0.spinAvailable', true)
+            ->assertJsonPath('data.0.isNew', true)
+            ->assertJsonStructure(['data' => [['verified', 'spinAvailable', 'isNew']]]);
+    }
+
+    public function test_spin_available_is_false_without_a_live_offer(): void
+    {
+        Business::factory()->create();
+
+        $this->getJson('/api/v1/businesses')
+            ->assertOk()
+            ->assertJsonPath('data.0.spinAvailable', false);
+    }
+
+    public function test_verified_filter_returns_only_verified_shops(): void
+    {
+        Business::factory()->create(['verified' => true, 'name' => 'Trusted Cafe']);
+        Business::factory()->create(['verified' => false, 'name' => 'New Kiosk']);
+
+        $this->getJson('/api/v1/businesses?verified=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.name', 'Trusted Cafe');
+    }
+
+    public function test_new_filter_returns_only_recent_shops(): void
+    {
+        Business::factory()->create(['name' => 'Fresh Spot']); // created now
+        $old = Business::factory()->create(['name' => 'Old Timer']);
+        $old->forceFill(['created_at' => now()->subDays(30)])->save();
+
+        $this->getJson('/api/v1/businesses?new=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.name', 'Fresh Spot');
+    }
+
     public function test_customer_can_favorite_and_unfavorite_a_business(): void
     {
         $customer = User::factory()->create();

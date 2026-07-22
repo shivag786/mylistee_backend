@@ -112,6 +112,30 @@ class Business extends Model
         return $this->hasMany(Offer::class)->live()->orderByDesc('priority');
     }
 
+    /** Menu products (Phase 7.2). @return HasMany<Product, $this> */
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
+    /** Per-business menu sections (Phase 7.2). @return HasMany<ProductCategory, $this> */
+    public function productCategories(): HasMany
+    {
+        return $this->hasMany(ProductCategory::class);
+    }
+
+    /** Promotions in the one engine (Phase 7.2b). @return HasMany<Promotion, $this> */
+    public function promotions(): HasMany
+    {
+        return $this->hasMany(Promotion::class);
+    }
+
+    /** Combo bundles (Phase 7.3). @return HasMany<Combo, $this> */
+    public function combos(): HasMany
+    {
+        return $this->hasMany(Combo::class);
+    }
+
     /** @return HasMany<Reward, $this> */
     public function rewards(): HasMany
     {

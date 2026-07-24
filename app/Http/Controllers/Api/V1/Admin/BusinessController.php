@@ -6,7 +6,9 @@ use App\Enums\BusinessStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Admin\AdminBusinessResource;
 use App\Models\Business;
+use App\Models\BusinessCategory;
 use App\Services\AuditService;
+use App\Services\ImageStorageService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +20,10 @@ use Illuminate\Validation\Rule;
  */
 class BusinessController extends Controller
 {
-    public function __construct(private readonly AuditService $audit) {}
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly ImageStorageService $images,
+    ) {}
 
     /** GET /admin/businesses */
     public function index(Request $request): JsonResponse
@@ -66,6 +71,77 @@ class BusinessController extends Controller
     }
 
     /** PATCH /admin/businesses/{uuid}/status */
+    /** PUT /admin/businesses/{uuid} — edit business information. */
+    public function update(Request $request, string $uuid): JsonResponse
+    {
+        $business = Business::where('uuid', $uuid)->first();
+        if ($business === null) {
+            return ApiResponse::error('Business not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:160'],
+            'category_id' => ['nullable', 'string'], // category uuid
+            'description' => ['nullable', 'string', 'max:2000'],
+            'address' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'email' => ['nullable', 'email', 'max:160'],
+            'website' => ['nullable', 'string', 'max:200'],
+            'facebook' => ['nullable', 'string', 'max:200'],
+            'instagram' => ['nullable', 'string', 'max:200'],
+            'whatsapp' => ['nullable', 'string', 'max:20'],
+            'gst' => ['nullable', 'string', 'max:40'],
+            'opening_time' => ['nullable', 'date_format:H:i'],
+            'closing_time' => ['nullable', 'date_format:H:i'],
+            'status' => ['nullable', Rule::enum(BusinessStatus::class)],
+        ]);
+
+        $attributes = $validated;
+        if (array_key_exists('category_id', $attributes)) {
+            $attributes['category_id'] = $attributes['category_id']
+                ? BusinessCategory::where('uuid', $attributes['category_id'])->value('id')
+                : null;
+        }
+
+        $business->update($attributes);
+        $this->audit->log($request->user(), 'business.update', $business, "Updated business {$business->name}");
+
+        return ApiResponse::success(
+            new AdminBusinessResource($business->fresh(['owner', 'category'])),
+            'Business updated.',
+        );
+    }
+
+    /** POST /admin/businesses/{uuid}/image — upload/replace the logo or banner. */
+    public function uploadImage(Request $request, string $uuid): JsonResponse
+    {
+        $business = Business::where('uuid', $uuid)->first();
+        if ($business === null) {
+            return ApiResponse::error('Business not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'type' => ['required', Rule::in(['logo', 'cover'])],
+            'image' => ['required', 'image', 'max:4096'],
+        ]);
+
+        $file = $request->file('image');
+        if ($validated['type'] === 'logo') {
+            $this->images->delete($business->logo_path);
+            $business->logo_path = $this->images->store($file, 'businesses/logos');
+        } else {
+            $this->images->delete($business->cover_path);
+            $business->cover_path = $this->images->store($file, 'businesses/covers');
+        }
+        $business->save();
+        $this->audit->log($request->user(), 'business.image', $business, "Updated {$validated['type']} for {$business->name}");
+
+        return ApiResponse::success(
+            new AdminBusinessResource($business->fresh(['owner', 'category'])),
+            'Image updated.',
+        );
+    }
+
     public function updateStatus(Request $request, string $uuid): JsonResponse
     {
         $validated = $request->validate([

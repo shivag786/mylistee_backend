@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\BroadcastController;
 use App\Http\Controllers\Api\V1\Admin\BusinessController as AdminBusinessController;
+use App\Http\Controllers\Api\V1\Admin\BusinessImportController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\V1\Admin\CategoryRequestController as AdminCategoryRequestController;
 use App\Http\Controllers\Api\V1\Admin\CmsController;
@@ -15,6 +16,9 @@ use App\Http\Controllers\Api\V1\Admin\ReportController;
 use App\Http\Controllers\Api\V1\Admin\ReviewController as AdminReviewController;
 use App\Http\Controllers\Api\V1\Admin\SettingController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\ComboFeedController;
+use App\Http\Controllers\Api\V1\ConfigController;
+use App\Http\Controllers\Api\V1\DealController;
 use App\Http\Controllers\Api\V1\Business\AnalyticsController;
 use App\Http\Controllers\Api\V1\Business\BusinessController;
 use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
@@ -23,6 +27,7 @@ use App\Http\Controllers\Api\V1\Business\ComboController;
 use App\Http\Controllers\Api\V1\Business\TokenLookupController;
 use App\Http\Controllers\Api\V1\Business\LoyaltyController;
 use App\Http\Controllers\Api\V1\Business\OfferController;
+use App\Http\Controllers\Api\V1\Business\OrderController as OwnerOrderController;
 use App\Http\Controllers\Api\V1\Business\ProductCategoryController;
 use App\Http\Controllers\Api\V1\Business\ProductController;
 use App\Http\Controllers\Api\V1\Business\PromotionController;
@@ -36,6 +41,7 @@ use App\Http\Controllers\Api\V1\DeviceTokenController;
 use App\Http\Controllers\Api\V1\FavoriteController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
 use App\Http\Controllers\Api\V1\WalletTokenController;
@@ -62,6 +68,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('businesses', [PublicBusinessController::class, 'index'])->name('businesses.index');
     Route::get('businesses/{slug}', [PublicBusinessController::class, 'show'])->name('businesses.show');
     Route::get('businesses/{slug}/reviews', [ReviewController::class, 'index'])->name('businesses.reviews');
+    Route::get('deals', [DealController::class, 'index'])->name('deals.index');
+    Route::get('combos', [ComboFeedController::class, 'index'])->name('combos.feed');
+    Route::get('config', [ConfigController::class, 'index'])->name('config.index');
 
     // Auth (document/phase/12 §Firebase Login Flow)
     Route::prefix('auth')->group(function (): void {
@@ -117,6 +126,11 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::post('loyalty/redeem', [CustomerLoyaltyController::class, 'redeem'])
             ->middleware('throttle:30,1')
             ->name('loyalty.redeem');
+
+        // Orders (Phase 7.5) — customer places + reviews their orders
+        Route::get('orders', [OrderController::class, 'index'])->name('orders.index');
+        Route::post('orders', [OrderController::class, 'store'])->name('orders.store');
+        Route::get('orders/{uuid}', [OrderController::class, 'show'])->name('orders.show');
 
         // Favorites + reviews (document/phase/11 §Favorites / Reviews)
         Route::get('favorites', [FavoriteController::class, 'index'])->name('favorites.index');
@@ -190,6 +204,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Customer wallet-token lookup at the counter (Phase 7.3)
             Route::post('token/lookup', [TokenLookupController::class, 'lookup'])->name('token.lookup');
 
+            // Order queue (Phase 7.5) — polled by the dashboard; owner drives status
+            Route::get('orders', [OwnerOrderController::class, 'index'])->name('orders.index');
+            Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
+
             // Promotions — "Grow Sales" engine (Phase 7.2b)
             Route::get('promotions', [PromotionController::class, 'index'])->name('promotions.index');
             Route::post('promotions', [PromotionController::class, 'store'])->name('promotions.store');
@@ -235,7 +253,19 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Business management
             Route::get('businesses', [AdminBusinessController::class, 'index'])->name('businesses.index');
+
+            // Business Import Engine (SPEC-011) — literal paths BEFORE the
+            // {uuid} wildcard so "import" is never parsed as a business id.
+            // Rate-limited to guard the upstream Google Places quota.
+            Route::post('businesses/import/preview', [BusinessImportController::class, 'preview'])
+                ->middleware('throttle:20,1')->name('businesses.import.preview');
+            Route::post('businesses/import', [BusinessImportController::class, 'import'])
+                ->middleware('throttle:20,1')->name('businesses.import');
+            Route::get('businesses/import/logs', [BusinessImportController::class, 'logs'])->name('businesses.import.logs');
+
             Route::get('businesses/{uuid}', [AdminBusinessController::class, 'show'])->name('businesses.show');
+            Route::put('businesses/{uuid}', [AdminBusinessController::class, 'update'])->name('businesses.update');
+            Route::post('businesses/{uuid}/image', [AdminBusinessController::class, 'uploadImage'])->name('businesses.image');
             Route::patch('businesses/{uuid}/status', [AdminBusinessController::class, 'updateStatus'])->name('businesses.status');
             Route::patch('businesses/{uuid}/verify', [AdminBusinessController::class, 'verify'])->name('businesses.verify');
             Route::patch('businesses/{uuid}/feature', [AdminBusinessController::class, 'feature'])->name('businesses.feature');
@@ -246,6 +276,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('categories/reorder', [AdminCategoryController::class, 'reorder'])->name('categories.reorder');
             Route::post('categories/{uuid}', [AdminCategoryController::class, 'update'])->name('categories.update'); // POST + _method for multipart
             Route::put('categories/{uuid}', [AdminCategoryController::class, 'update']);
+            Route::patch('categories/{uuid}/visibility', [AdminCategoryController::class, 'visibility'])->name('categories.visibility');
             Route::delete('categories/{uuid}', [AdminCategoryController::class, 'destroy'])->name('categories.destroy');
 
             // Owner category requests moderation (Phase 7.1)

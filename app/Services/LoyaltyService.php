@@ -411,4 +411,57 @@ class LoyaltyService
             return $reward;
         });
     }
+
+    /**
+     * Spend coins on an order (Phase 7.5). Row-locked balance check prevents
+     * overspending under concurrency. Returns the ledger entry.
+     *
+     * @throws ValidationException
+     */
+    public function spend(User $user, int $coins, Business $business, ?Model $reference = null, ?string $description = null): WalletTransaction
+    {
+        return DB::transaction(function () use ($user, $coins, $business, $reference, $description): WalletTransaction {
+            $balance = (int) $user->walletTransactions()->lockForUpdate()->sum('amount');
+
+            if ($coins <= 0 || $balance < $coins) {
+                throw ValidationException::withMessages([
+                    'coins' => ["You only have {$balance} coins to spend."],
+                ]);
+            }
+
+            return $user->walletTransactions()->create([
+                'business_id' => $business->id,
+                'type' => CoinTransactionType::Spend,
+                'source' => CoinSource::OrderSpend,
+                'amount' => -$coins,
+                'balance_after' => $balance - $coins,
+                'description' => $description ?? 'Paid with coins',
+                'reference_type' => $reference?->getMorphClass(),
+                'reference_id' => $reference?->getKey(),
+            ]);
+        });
+    }
+
+    /** Refund previously spent order coins (e.g. on cancellation). */
+    public function refund(User $user, int $coins, Business $business, ?Model $reference = null, ?string $description = null): ?WalletTransaction
+    {
+        if ($coins <= 0) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($user, $coins, $business, $reference, $description): WalletTransaction {
+            $balance = (int) $user->walletTransactions()->lockForUpdate()->sum('amount');
+
+            return $user->walletTransactions()->create([
+                'business_id' => $business->id,
+                'type' => CoinTransactionType::Adjust,
+                'source' => CoinSource::OrderSpend,
+                'amount' => $coins,
+                'balance_after' => $balance + $coins,
+                'description' => $description ?? 'Coins refunded',
+                'reference_type' => $reference?->getMorphClass(),
+                'reference_id' => $reference?->getKey(),
+            ]);
+        });
+    }
 }

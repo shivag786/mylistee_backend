@@ -43,4 +43,11 @@ return [
         'model' => env('ANTHROPIC_MODEL', 'claude-opus-4-8'),
     ],
 
+    // Google Places — powers the Business Import Engine (SPEC-011). Optional:
+    // when the key is absent (and not in production) the importer returns a
+    // deterministic sandbox preview so the flow is demoable without credentials.
+    'google' => [
+        'places_key' => env('GOOGLE_PLACES_API_KEY'),
+    ],
+
 ];

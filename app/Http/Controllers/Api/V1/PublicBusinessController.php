@@ -50,7 +50,18 @@ class PublicBusinessController extends Controller
     {
         $business = Business::where('slug', $slug)
             ->where('status', BusinessStatus::Active->value)
-            ->with(['category', 'gallery', 'liveOffers'])
+            ->with([
+                'category',
+                'gallery',
+                'liveOffers',
+                // Menu (Phase 7.4): visible products grouped into their sections,
+                // with active promotions so effective prices show.
+                'productCategories' => fn ($q) => $q->orderBy('position')->orderBy('name'),
+                'products' => fn ($q) => $q->where('is_visible', true)
+                    ->orderBy('position')->latest('id')->with(['category', 'promotions']),
+                'combos' => fn ($q) => $q->where('is_visible', true)
+                    ->orderBy('position')->latest('id')->with('items.product'),
+            ])
             ->first();
 
         if ($business === null) {

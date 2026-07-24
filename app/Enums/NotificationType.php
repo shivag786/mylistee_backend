@@ -12,5 +12,7 @@ enum NotificationType: string
     case RewardRedeemed = 'reward_redeemed';
     case SpinActivity = 'spin_activity';
     case OfferExpiring = 'offer_expiring';
+    case OrderPlaced = 'order_placed';
+    case OrderUpdate = 'order_update';
     case System = 'system';
 }

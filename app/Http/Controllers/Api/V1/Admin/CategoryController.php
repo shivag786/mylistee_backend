@@ -71,6 +71,32 @@ class CategoryController extends Controller
         );
     }
 
+    /** PATCH /admin/categories/{uuid}/visibility — inline homepage/search toggles. */
+    public function visibility(Request $request, string $uuid): JsonResponse
+    {
+        $category = BusinessCategory::where('uuid', $uuid)->first();
+        if ($category === null) {
+            return ApiResponse::error('Category not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'show_on_homepage' => ['nullable', 'boolean'],
+            'show_in_search' => ['nullable', 'boolean'],
+        ]);
+
+        $category = $this->categories->setVisibility(
+            $category,
+            array_key_exists('show_on_homepage', $validated) ? (bool) $validated['show_on_homepage'] : null,
+            array_key_exists('show_in_search', $validated) ? (bool) $validated['show_in_search'] : null,
+        );
+        $this->audit->log($request->user(), 'category.visibility', $category, "Updated visibility for {$category->name}");
+
+        return ApiResponse::success(
+            new AdminCategoryResource($category->loadCount('businesses')),
+            'Category visibility updated.',
+        );
+    }
+
     /** DELETE /admin/categories/{uuid} */
     public function destroy(Request $request, string $uuid): JsonResponse
     {

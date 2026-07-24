@@ -128,6 +128,25 @@ class CategoryService
         return $attributes;
     }
 
+    /**
+     * Flip a category's homepage / search visibility without touching its other
+     * fields (used by the inline admin toggles). Null leaves a flag unchanged.
+     */
+    public function setVisibility(BusinessCategory $category, ?bool $homepage, ?bool $search): BusinessCategory
+    {
+        if ($homepage !== null) {
+            $category->show_on_homepage = $homepage;
+        }
+        if ($search !== null) {
+            $category->show_in_search = $search;
+        }
+
+        $category->save();
+        $this->bustCache();
+
+        return $category;
+    }
+
     private function bustCache(): void
     {
         Cache::forget(self::CACHE_KEY);

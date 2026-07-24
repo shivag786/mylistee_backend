@@ -27,6 +27,7 @@ class ComboResource extends JsonResource
             'savings' => $this->savings(),
             'coinsEarned' => $this->coins_earned,
             'walletCoinsAccepted' => (bool) $this->wallet_coins_accepted,
+            'coinsAccepted' => $this->coins_accepted !== null ? (int) $this->coins_accepted : 0,
             'nextVisitCoupon' => $this->next_visit_coupon,
             'bonusReward' => $this->bonus_reward,
             'items' => ComboItemResource::collection($this->whenLoaded('items')),

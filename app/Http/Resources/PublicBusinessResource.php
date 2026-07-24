@@ -44,7 +44,49 @@ class PublicBusinessResource extends JsonResource
             'totalReviews' => $this->total_reviews,
             'gallery' => GalleryImageResource::collection($this->whenLoaded('gallery')),
             'offers' => PublicOfferResource::collection($this->whenLoaded('liveOffers')),
+            'menu' => $this->buildMenu(),
+            'combos' => ComboResource::collection($this->whenLoaded('combos')),
         ];
+    }
+
+    /**
+     * Group visible products into their menu sections for the customer menu
+     * (Phase 7.4). Uncategorised products fall into a default "Menu" section.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildMenu(): array
+    {
+        if (! $this->relationLoaded('products')) {
+            return [];
+        }
+
+        $byCategory = $this->products->groupBy('product_category_id');
+        $sections = [];
+
+        if ($this->relationLoaded('productCategories')) {
+            foreach ($this->productCategories as $category) {
+                $items = $byCategory->get($category->id);
+                if ($items && $items->isNotEmpty()) {
+                    $sections[] = [
+                        'id' => $category->uuid,
+                        'name' => $category->name,
+                        'products' => ProductResource::collection($items),
+                    ];
+                }
+            }
+        }
+
+        $uncategorised = $byCategory->get(null);
+        if ($uncategorised && $uncategorised->isNotEmpty()) {
+            $sections[] = [
+                'id' => 'general',
+                'name' => 'Menu',
+                'products' => ProductResource::collection($uncategorised),
+            ];
+        }
+
+        return $sections;
     }
 
     private function url(?string $path): ?string

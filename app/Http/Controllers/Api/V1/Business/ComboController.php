@@ -86,6 +86,7 @@ class ComboController extends Controller
             'product_category_id' => ['nullable', 'string'],
             'coins_earned' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'wallet_coins_accepted' => ['nullable', 'boolean'],
+            'coins_accepted' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'next_visit_coupon' => ['nullable', 'string', 'max:120'],
             'bonus_reward' => ['nullable', 'string', 'max:120'],
             'starts_at' => ['nullable', 'date'],

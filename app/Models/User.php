@@ -110,6 +110,12 @@ class User extends Authenticatable
         return $this->hasMany(CustomerToken::class);
     }
 
+    /** Orders placed by this customer (Phase 7.5). @return HasMany<Order, $this> */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'customer_id');
+    }
+
     /** @return HasMany<Reward, $this> */
     public function rewards(): HasMany
     {

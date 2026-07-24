@@ -11,6 +11,10 @@ return [
     // Master switch for the whole loyalty layer.
     'enabled' => (bool) env('LOYALTY_ENABLED', true),
 
+    // Rupee value of one coin when spent on an order (Phase 7.5). 1 coin = ₹1 by
+    // default. Never hardcode — read via config('loyalty.coin_value').
+    'coin_value' => (int) env('LOYALTY_COIN_VALUE', 1),
+
     // Default coins granted per earning event (document/phase/02 §Rewards).
     'earn' => [
         'spin' => 10,        // every wheel spin

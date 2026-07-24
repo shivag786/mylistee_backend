@@ -27,6 +27,7 @@ class Combo extends Model
         'combo_price',
         'coins_earned',
         'wallet_coins_accepted',
+        'coins_accepted',
         'next_visit_coupon',
         'bonus_reward',
         'starts_at',
@@ -44,6 +45,7 @@ class Combo extends Model
         return [
             'combo_price' => 'decimal:2',
             'wallet_coins_accepted' => 'boolean',
+            'coins_accepted' => 'integer',
             'auto_enable' => 'boolean',
             'auto_disable' => 'boolean',
             'is_visible' => 'boolean',

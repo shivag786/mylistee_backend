@@ -15,6 +15,8 @@ enum CoinSource: string
     case Redeem = 'redeem';
     case Welcome = 'welcome';
     case TierRedeem = 'tier_redeem';
+    case OrderSpend = 'order_spend';
+    case OrderEarn = 'order_earn';
     case AdminAdjust = 'admin_adjust';
 
     /** The config key under `loyalty.earn` this source earns from, if any. */
@@ -55,6 +57,8 @@ enum CoinSource: string
             self::Redeem => 'Redemption bonus',
             self::Welcome => 'Welcome bonus',
             self::TierRedeem => 'Redeemed a reward',
+            self::OrderSpend => 'Paid with coins',
+            self::OrderEarn => 'Order reward',
             self::AdminAdjust => 'Adjustment',
         };
     }

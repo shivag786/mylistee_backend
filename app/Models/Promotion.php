@@ -129,6 +129,32 @@ class Promotion extends Model
         return (float) max(0, min($discount, $base));
     }
 
+    /**
+     * A short, customer-facing label describing the offer — e.g. "20% OFF",
+     * "₹50 OFF", "Buy 1 Get 1", "Buy 2+ · ₹50 off". Covers every type, including
+     * BOGO / quantity discounts that don't change the unit price.
+     */
+    public function displayLabel(): string
+    {
+        $config = $this->config ?? [];
+        $num = fn (float $n): string => rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+
+        $discountType = $config['discount_type'] ?? 'percentage';
+        $value = (float) ($config['value'] ?? 0);
+        $amount = $discountType === 'flat' ? '₹'.$num($value).' off' : $num($value).'% off';
+
+        return match ($this->promotion_type) {
+            PromotionType::Percentage => $num($value).'% OFF',
+            PromotionType::Flat => '₹'.$num($value).' OFF',
+            PromotionType::Bogo => 'Buy '.(int) ($config['buy_qty'] ?? 1).' Get '.(int) ($config['get_qty'] ?? 1),
+            PromotionType::QuantityDiscount => 'Buy '.(int) ($config['min_qty'] ?? 2).'+ · '.$amount,
+            PromotionType::HappyHour => 'Happy hour · '.$amount,
+            PromotionType::FlashSale => 'Flash sale · '.$amount,
+            PromotionType::Weekend => 'Weekend · '.$amount,
+            PromotionType::Festival => 'Festival · '.$amount,
+        };
+    }
+
     private function normaliseTime(string $time): string
     {
         // Accept "H:i" or "H:i:s"; compare as "H:i:s".

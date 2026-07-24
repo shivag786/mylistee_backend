@@ -46,6 +46,19 @@ class ProductResource extends JsonResource
                     'type' => $promotion->promotion_type->value,
                 ];
             }),
+            // Any active promotion (incl. BOGO / quantity discounts that don't
+            // change the unit price) with its type + a short display label, so the
+            // customer menu can surface every offer type.
+            'promo' => $this->whenLoaded('promotions', function () {
+                $promotion = $this->activeDisplayPromotion();
+
+                return $promotion === null ? null : [
+                    'name' => $promotion->name,
+                    'type' => $promotion->promotion_type->value,
+                    'typeLabel' => $promotion->promotion_type->label(),
+                    'label' => $promotion->displayLabel(),
+                ];
+            }),
             'foodType' => $foodType,
             'availableFrom' => $this->available_from,
             'availableTo' => $this->available_to,

@@ -42,6 +42,17 @@ class Business extends Model
         'featured',
         'created_by',
         'updated_by',
+        // SPEC-011 — Google Business Import fields (URLs/references only).
+        'google_business_url',
+        'google_place_id',
+        'google_rating',
+        'google_review_count',
+        'google_primary_image_url',
+        'google_secondary_image_url',
+        'google_category',
+        'google_imported_at',
+        'google_last_sync',
+        'google_sync_status',
     ];
 
     protected function casts(): array
@@ -53,6 +64,10 @@ class Business extends Model
             'latitude' => 'decimal:7',
             'longitude' => 'decimal:7',
             'average_rating' => 'decimal:2',
+            'google_rating' => 'decimal:2',
+            'google_review_count' => 'integer',
+            'google_imported_at' => 'datetime',
+            'google_last_sync' => 'datetime',
         ];
     }
 
@@ -136,6 +151,12 @@ class Business extends Model
         return $this->hasMany(Combo::class);
     }
 
+    /** Customer orders (Phase 7.5). @return HasMany<Order, $this> */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
     /** @return HasMany<Reward, $this> */
     public function rewards(): HasMany
     {
@@ -152,6 +173,29 @@ class Business extends Model
     public function visits(): HasMany
     {
         return $this->hasMany(BusinessVisit::class);
+    }
+
+    /** SPEC-011 §ADMIN LOG — import history for this business. @return HasMany<BusinessImportLog, $this> */
+    public function importLogs(): HasMany
+    {
+        return $this->hasMany(BusinessImportLog::class)->latest();
+    }
+
+    /**
+     * SPEC-011 §IMAGE POLICY — resolve the cover image to display with the
+     * priority owner upload → Google image URL → placeholder. Callers pass the
+     * public owner-image URL (or null); returns the URL to render, or null to
+     * fall back to a UI placeholder.
+     */
+    public function displayCoverUrl(?string $ownerUrl): ?string
+    {
+        return $ownerUrl ?: $this->google_primary_image_url ?: null;
+    }
+
+    /** SPEC-011 §IMAGE POLICY — secondary image with the same priority order. */
+    public function displaySecondaryUrl(?string $ownerUrl): ?string
+    {
+        return $ownerUrl ?: $this->google_secondary_image_url ?: null;
     }
 
     /** Per-business loyalty configuration (null earn rates fall back to config). @return HasOne<LoyaltyProgram, $this> */
@@ -245,7 +289,22 @@ class Business extends Model
         }
 
         $now = now()->format('H:i:s');
+        $open = $this->normaliseTime((string) $this->opening_time);
+        $close = $this->normaliseTime((string) $this->closing_time);
 
-        return $now >= $this->opening_time && $now <= $this->closing_time;
+        if ($open === $close) {
+            return true; // open 24 hours
+        }
+
+        // Overnight windows (e.g. 18:00–02:00) wrap past midnight.
+        return $close > $open
+            ? ($now >= $open && $now <= $close)
+            : ($now >= $open || $now <= $close);
+    }
+
+    /** Coerce a time value to "H:i:s" for safe string comparison. */
+    private function normaliseTime(string $time): string
+    {
+        return strlen($time) === 5 ? $time.':00' : $time;
     }
 }

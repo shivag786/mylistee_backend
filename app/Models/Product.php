@@ -110,4 +110,17 @@ class Product extends Model
 
         return $promotion === null ? $base : round($base - $promotion->discountAmount($base), 2);
     }
+
+    /**
+     * The best currently-active promotion of ANY type, or null — including
+     * BOGO / quantity discounts that don't change the unit price. Used to display
+     * the offer (type + label) even when there's no per-unit price to strike.
+     */
+    public function activeDisplayPromotion(): ?Promotion
+    {
+        return $this->promotions
+            ->filter(fn (Promotion $p) => $p->isActiveNow())
+            ->sortByDesc('priority')
+            ->first();
+    }
 }

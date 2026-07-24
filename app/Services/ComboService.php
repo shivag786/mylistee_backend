@@ -119,7 +119,7 @@ class ComboService
     private function attributes(array $data): array
     {
         $attributes = [];
-        foreach (['name', 'combo_price', 'coins_earned', 'next_visit_coupon', 'bonus_reward', 'starts_at', 'ends_at', 'position'] as $field) {
+        foreach (['name', 'combo_price', 'coins_earned', 'coins_accepted', 'next_visit_coupon', 'bonus_reward', 'starts_at', 'ends_at', 'position'] as $field) {
             if (array_key_exists($field, $data)) {
                 $attributes[$field] = $data[$field] === '' ? null : $data[$field];
             }

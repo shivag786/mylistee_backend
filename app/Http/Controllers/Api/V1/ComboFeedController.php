@@ -12,8 +12,8 @@ use Illuminate\Http\Request;
 
 /**
  * Public "Meal combos" feed for the customer home page: visible combos that are
- * active right now, across active shops, biggest saving first. Uses the Combo
- * model's own active/savings logic so it matches the shop profile.
+ * active right now, across active shops, newest first. Uses the Combo model's
+ * own active logic so it matches the shop profile.
  */
 class ComboFeedController extends Controller
 {
@@ -30,8 +30,8 @@ class ComboFeedController extends Controller
             ->limit(120)
             ->get()
             // isActiveNow() also honours the auto-enable/disable schedule windows.
+            // Order stays newest-first (latest id) — the query's sort is preserved.
             ->filter(fn (Combo $combo) => $combo->isActiveNow())
-            ->sortByDesc(fn (Combo $combo) => $combo->savings())
             ->take($limit)
             ->values();
 

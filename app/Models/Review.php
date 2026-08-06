@@ -16,6 +16,7 @@ class Review extends Model
     protected $fillable = [
         'business_id',
         'customer_id',
+        'order_id',
         'rating',
         'comment',
         'reply',
@@ -47,5 +48,11 @@ class Review extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'customer_id');
+    }
+
+    /** The completed order that verified this review, if any. @return BelongsTo<Order, $this> */
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class);
     }
 }

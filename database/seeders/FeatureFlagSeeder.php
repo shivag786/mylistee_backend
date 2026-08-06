@@ -30,5 +30,20 @@ class FeatureFlagSeeder extends Seeder
         foreach (self::FLAGS as $flag) {
             FeatureFlag::firstOrCreate(['key' => $flag['key']], $flag);
         }
+
+        // Owner-menu module flags (key `owner_<id>`) — control which pages/services
+        // appear in the business-owner navigation. Default ON. Registry is the
+        // single source in config/owner_modules.php.
+        foreach ((array) config('owner_modules', []) as $id => $module) {
+            FeatureFlag::firstOrCreate(
+                ['key' => "owner_{$id}"],
+                [
+                    'key' => "owner_{$id}",
+                    'name' => "Owner menu: {$module['name']}",
+                    'description' => $module['description'],
+                    'enabled' => true,
+                ],
+            );
+        }
     }
 }

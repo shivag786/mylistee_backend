@@ -53,15 +53,16 @@ class Reward extends Model
         });
     }
 
-    /** Human-friendly, unambiguous redemption code (no 0/O/1/I). */
+    /**
+     * Counter-friendly 6-digit numeric PIN. Easy to read off a phone and type on
+     * a numpad; uniqueness is guaranteed by a collision check. A leading zero is
+     * allowed (the column is a string), so the full 100000–999999-ish space
+     * minus the first digit is available; we keep it strictly 6 digits.
+     */
     public static function generateCode(): string
     {
-        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         do {
-            $code = '';
-            for ($i = 0; $i < 8; $i++) {
-                $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
-            }
+            $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         } while (self::where('code', $code)->exists());
 
         return $code;

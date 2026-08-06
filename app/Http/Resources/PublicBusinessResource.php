@@ -46,7 +46,46 @@ class PublicBusinessResource extends JsonResource
             'offers' => PublicOfferResource::collection($this->whenLoaded('liveOffers')),
             'menu' => $this->buildMenu(),
             'combos' => ComboResource::collection($this->whenLoaded('combos')),
+            'service' => $this->buildService(),
+            'tables' => $this->buildTables(),
         ];
+    }
+
+    /**
+     * Enabled fulfilment modes + delivery fee for the checkout picker (Phase 7.6).
+     * Falls back to pickup-only so unconfigured shops behave exactly as before.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildService(): array
+    {
+        $modes = array_map(fn ($t) => $t->value, $this->serviceModes());
+
+        return [
+            'modes' => $modes,
+            'defaultMode' => in_array($this->serviceSetting?->default_mode, $modes, true)
+                ? $this->serviceSetting->default_mode
+                : $modes[0],
+            'deliveryFee' => $this->deliveryFee(),
+        ];
+    }
+
+    /**
+     * Active dine-in tables the customer can pick at checkout (Phase 7.6).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTables(): array
+    {
+        if (! $this->relationLoaded('tables')) {
+            return [];
+        }
+
+        return $this->tables->map(fn ($table) => [
+            'id' => $table->uuid,
+            'label' => $table->label,
+            'capacity' => $table->capacity,
+        ])->all();
     }
 
     /**

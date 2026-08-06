@@ -182,6 +182,40 @@ class AdminService
     }
 
     /**
+     * Revenue KPIs for the admin Revenue page: lifetime paid, this month's paid,
+     * count of live subscriptions, and MRR (each active subscription's price
+     * normalized to a monthly figure).
+     *
+     * @return array<string, float|int>
+     */
+    public function revenueSummary(): array
+    {
+        $today = Carbon::today();
+        $paid = fn (Builder $q): Builder => $q->where('status', InvoiceStatus::Paid->value);
+
+        $activeSubs = Subscription::query()->active()
+            ->where(fn (Builder $q) => $q->whereNull('ends_at')->orWhere('ends_at', '>', now()))
+            ->get(['price', 'interval']);
+
+        $mrr = $activeSubs->sum(fn (Subscription $s): float => match ($s->interval) {
+            'year' => (float) $s->price / 12,
+            'quarter' => (float) $s->price / 3,
+            'lifetime' => 0.0,
+            default => (float) $s->price,
+        });
+
+        return [
+            'totalRevenue' => (float) $paid(Invoice::query())->sum('amount'),
+            'thisMonthRevenue' => (float) $paid(Invoice::query())
+                ->whereYear('issued_at', $today->year)
+                ->whereMonth('issued_at', $today->month)
+                ->sum('amount'),
+            'activeSubscriptions' => $activeSubs->count(),
+            'mrr' => round($mrr, 2),
+        ];
+    }
+
+    /**
      * @param  Builder<covariant \Illuminate\Database\Eloquent\Model>  $query
      * @return array<string, int>
      */

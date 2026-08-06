@@ -17,6 +17,10 @@ class ComboResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        // "Most ordered" social proof — present only when loaded (public menu).
+        $orderCount = $this->resource->getAttribute('order_count');
+        $orderCount = $orderCount !== null ? (int) $orderCount : null;
+
         return [
             'id' => $this->uuid,
             'name' => $this->name,
@@ -26,6 +30,8 @@ class ComboResource extends JsonResource
             'totalMrp' => $this->totalMrp(),
             'savings' => $this->savings(),
             'coinsEarned' => $this->coins_earned,
+            'orderCount' => $orderCount,
+            'isPopular' => $orderCount !== null && $orderCount >= (int) config('orders.popular.threshold', 5),
             'walletCoinsAccepted' => (bool) $this->wallet_coins_accepted,
             'coinsAccepted' => $this->coins_accepted !== null ? (int) $this->coins_accepted : 0,
             'nextVisitCoupon' => $this->next_visit_coupon,

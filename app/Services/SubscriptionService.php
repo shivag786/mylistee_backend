@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\PromotionStatus;
 use App\Enums\SubscriptionStatus;
 use App\Models\Business;
 use App\Models\Invoice;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\DB;
  */
 class SubscriptionService
 {
+    public function __construct(private readonly PlanLimitService $limits) {}
+
     /**
      * The canonical current-subscription payload for a business — used by both
      * the GET and the change endpoints so the client always sees fresh state.
@@ -56,12 +59,18 @@ class SubscriptionService
 
             $business->forgetPlanCache();
 
+            // On a downgrade the new plan may allow fewer active combos/promotions
+            // than are currently live — deactivate the excess (newest kept), never
+            // delete. Reversible: they light back up on upgrade.
+            $this->reconcileToPlan($business, $plan);
+
             if ($plan->is_default || $plan->isFree()) {
                 return null; // now on the free fallback
             }
 
             $startsAt = Carbon::now();
             $endsAt = match ($plan->interval) {
+                'quarter' => $startsAt->copy()->addMonths(3),
                 'year' => $startsAt->copy()->addYear(),
                 'lifetime' => null,
                 default => $startsAt->copy()->addMonth(),
@@ -118,6 +127,14 @@ class SubscriptionService
                 'used' => $business->offers()->countsAsActive()->count(),
                 'limit' => $plan?->max_active_offers,
             ],
+            'activeCombos' => [
+                'used' => $this->limits->activeCombos($business),
+                'limit' => $plan?->max_active_combos,
+            ],
+            'activePromotions' => [
+                'used' => $this->limits->activePromotions($business),
+                'limit' => $plan?->max_active_promotions,
+            ],
             'galleryImages' => [
                 'used' => $business->gallery()->count(),
                 'limit' => $plan?->max_gallery_images,
@@ -127,6 +144,32 @@ class SubscriptionService
                 'limit' => $plan?->max_qr_codes,
             ],
         ];
+    }
+
+    /**
+     * Deactivate combos/promotions that exceed the target plan's active quotas,
+     * keeping the newest ones live. Nothing is deleted — this is fully reversible
+     * on a later upgrade (SPEC: never delete, only activate/inactivate).
+     */
+    private function reconcileToPlan(Business $business, Plan $plan): void
+    {
+        if (($comboLimit = $plan->max_active_combos) !== null) {
+            // Keep the newest $comboLimit; everything after is excess.
+            $excess = $business->combos()->where('is_visible', true)
+                ->orderByDesc('id')->pluck('id')->slice($comboLimit);
+            if ($excess->isNotEmpty()) {
+                $business->combos()->whereIn('id', $excess->all())->update(['is_visible' => false]);
+            }
+        }
+
+        if (($promoLimit = $plan->max_active_promotions) !== null) {
+            $excess = $business->promotions()
+                ->whereIn('status', [PromotionStatus::Running->value, PromotionStatus::Scheduled->value])
+                ->orderByDesc('id')->pluck('id')->slice($promoLimit);
+            if ($excess->isNotEmpty()) {
+                $business->promotions()->whereIn('id', $excess->all())->update(['status' => PromotionStatus::Paused->value]);
+            }
+        }
     }
 
     /** @return \Illuminate\Support\Collection<int, Invoice> */

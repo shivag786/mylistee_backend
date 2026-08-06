@@ -28,6 +28,9 @@ class BusinessListItemResource extends JsonResource
             'category' => $this->category?->name,
             'area' => $this->address,
             'coverImage' => $this->url($this->cover_path),
+            // First product image (when loaded via discovery) — the card prefers
+            // this over the banner. Null falls back to coverImage on the client.
+            'previewImage' => $this->url($this->getAttribute('preview_image_path')),
             'logo' => $this->url($this->logo_path),
             'rating' => (float) $this->average_rating,
             'reviewCount' => $this->total_reviews,
@@ -38,8 +41,8 @@ class BusinessListItemResource extends JsonResource
             'verified' => (bool) $this->verified,
             // Spinnable now: active shop with at least one live offer to award.
             'spinAvailable' => $this->status === BusinessStatus::Active && (int) ($this->offer_count ?? 0) > 0,
-            // Recently onboarded (last 14 days) — powers the "New" badge/row.
-            'isNew' => $this->created_at !== null && $this->created_at->gt(now()->subDays(14)),
+            // Recently onboarded (last 3 days) — powers the "New" badge/row.
+            'isNew' => $this->created_at !== null && $this->created_at->gt(now()->subDays(3)),
             'status' => $this->status->value,
         ];
     }

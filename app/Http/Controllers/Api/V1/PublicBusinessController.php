@@ -30,7 +30,7 @@ class PublicBusinessController extends Controller
     /** GET /businesses — discovery list (search / category / sort / nearby). */
     public function index(Request $request): JsonResponse
     {
-        $filters = $request->only(['search', 'category', 'sort', 'lat', 'lng', 'page', 'perPage', 'verified', 'new']);
+        $filters = $request->only(['search', 'category', 'sort', 'lat', 'lng', 'page', 'perPage', 'verified', 'new', 'withContent']);
         $page = $this->discovery->list($filters, $request->user('sanctum'));
 
         return ApiResponse::success(
@@ -45,6 +45,17 @@ class PublicBusinessController extends Controller
         );
     }
 
+    /**
+     * Constrain an orderItems sub-query to non-cancelled orders within the
+     * "most ordered" window (config/orders.php) — the basis of the Popular badge.
+     */
+    private function orderedRecently($query)
+    {
+        return $query->whereHas('order', fn ($o) => $o
+            ->where('status', '!=', 'cancelled')
+            ->where('created_at', '>=', now()->subDays((int) config('orders.popular.window_days', 90))));
+    }
+
     /** GET /businesses/{slug} */
     public function show(Request $request, string $slug): JsonResponse
     {
@@ -54,13 +65,18 @@ class PublicBusinessController extends Controller
                 'category',
                 'gallery',
                 'liveOffers',
+                // Service layer (Phase 7.6): enabled modes + active dine-in tables.
+                'serviceSetting',
+                'tables' => fn ($q) => $q->where('status', 'active'),
                 // Menu (Phase 7.4): visible products grouped into their sections,
                 // with active promotions so effective prices show.
                 'productCategories' => fn ($q) => $q->orderBy('position')->orderBy('name'),
                 'products' => fn ($q) => $q->where('is_visible', true)
-                    ->orderBy('position')->latest('id')->with(['category', 'promotions']),
+                    ->orderBy('position')->latest('id')->with(['category', 'promotions'])
+                    ->withSum(['orderItems as order_count' => fn ($oi) => $this->orderedRecently($oi)], 'quantity'),
                 'combos' => fn ($q) => $q->where('is_visible', true)
-                    ->orderBy('position')->latest('id')->with('items.product'),
+                    ->orderBy('position')->latest('id')->with('items.product')
+                    ->withSum(['orderItems as order_count' => fn ($oi) => $this->orderedRecently($oi)], 'quantity'),
             ])
             ->first();
 

@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\BusinessStatus;
+use App\Enums\ServiceType;
+use Database\Factories\BusinessFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,7 +15,7 @@ use Illuminate\Support\Str;
 
 class Business extends Model
 {
-    /** @use HasFactory<\Database\Factories\BusinessFactory> */
+    /** @use HasFactory<BusinessFactory> */
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -202,6 +204,47 @@ class Business extends Model
     public function loyaltyProgram(): HasOne
     {
         return $this->hasOne(LoyaltyProgram::class);
+    }
+
+    /** Dining tables (dine-in). @return HasMany<BusinessTable, $this> */
+    public function tables(): HasMany
+    {
+        return $this->hasMany(BusinessTable::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /** Service configuration — which fulfilment modes + delivery fee. @return HasOne<BusinessServiceSetting, $this> */
+    public function serviceSetting(): HasOne
+    {
+        return $this->hasOne(BusinessServiceSetting::class);
+    }
+
+    /**
+     * The service modes this business offers, as ServiceType enums. Falls back to
+     * pickup-only when unconfigured, so bakeries keep their current behaviour.
+     *
+     * @return array<int, ServiceType>
+     */
+    public function serviceModes(): array
+    {
+        return $this->serviceSetting?->enabledTypes() ?? [ServiceType::default()];
+    }
+
+    /** True when this business offers the given service mode. */
+    public function offersService(ServiceType $type): bool
+    {
+        foreach ($this->serviceModes() as $mode) {
+            if ($mode === $type) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** The flat delivery fee for this business (0 when unset). */
+    public function deliveryFee(): float
+    {
+        return (float) ($this->serviceSetting?->delivery_fee ?? 0);
     }
 
     /** Reward tiers customers can spend coins on. @return HasMany<LoyaltyReward, $this> */

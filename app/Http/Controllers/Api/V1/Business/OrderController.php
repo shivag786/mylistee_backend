@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Business;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentMethod;
 use App\Http\Controllers\Api\V1\Business\Concerns\ResolvesBusiness;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
@@ -30,7 +31,7 @@ class OrderController extends Controller
         $business = $this->business($request);
 
         $query = $business->orders()
-            ->with(['items', 'customer:id,name'])
+            ->with(['items', 'customer:id,name', 'diningTable:id,label'])
             ->when($request->string('status')->trim()->value(), fn ($q, $s) => $q->where('status', $s))
             ->when(
                 $request->string('since')->trim()->value(),
@@ -49,19 +50,25 @@ class OrderController extends Controller
     /** PATCH /business/orders/{uuid}/status */
     public function status(Request $request, string $uuid): JsonResponse
     {
-        $order = $this->business($request)->orders()->with('items')->where('uuid', $uuid)->first();
+        $order = $this->business($request)->orders()->with(['items', 'diningTable:id,label'])->where('uuid', $uuid)->first();
         if ($order === null) {
             return ApiResponse::error('Order not found.', status: 404);
         }
 
         $validated = $request->validate([
             'status' => ['required', Rule::in(['confirmed', 'paid', 'completed', 'cancelled'])],
+            // Only meaningful when marking paid: how the customer paid at the counter.
+            'payment_method' => ['nullable', Rule::in(PaymentMethod::values())],
         ]);
 
-        $order = $this->orders->transition($order, OrderStatus::from($validated['status']), $request->user());
+        $paymentMethod = isset($validated['payment_method'])
+            ? PaymentMethod::from($validated['payment_method'])
+            : null;
+
+        $order = $this->orders->transition($order, OrderStatus::from($validated['status']), $request->user(), $paymentMethod);
 
         return ApiResponse::success(
-            new OrderResource($order->load(['items', 'customer:id,name'])),
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
             'Order updated.',
         );
     }

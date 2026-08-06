@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\BusinessStatus;
 use App\Models\Business;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\LengthAwarePaginator as Paginator;
@@ -30,7 +31,22 @@ class BusinessDiscoveryService
         $sort = $filters['sort'] ?? 'newest';
 
         $query = Business::query()
+            ->select('businesses.*')
+            // A representative product image for the card (first visible product
+            // with an image) — the card prefers it over the shop banner.
+            ->addSelect(['preview_image_path' => Product::select('image_path')
+                ->whereColumn('products.business_id', 'businesses.id')
+                ->where('is_visible', true)
+                ->whereNotNull('image_path')
+                ->orderBy('position')
+                ->limit(1),
+            ])
             ->where('status', BusinessStatus::Active->value)
+            // Categories hidden from search (show_in_search = false) are excluded;
+            // uncategorised shops still appear.
+            ->where(fn ($q) => $q
+                ->whereHas('category', fn ($c) => $c->where('show_in_search', true))
+                ->orWhereNull('category_id'))
             ->with('category')
             ->withCount(['offers as offer_count' => fn ($q) => $q->live()]);
 
@@ -54,6 +70,17 @@ class BusinessDiscoveryService
         // New-shops row: onboarded within the last 14 days.
         if (! empty($filters['new'])) {
             $query->where('created_at', '>=', now()->subDays(14));
+        }
+
+        // Homepage discovery: hide "empty" shops (just a banner, nothing to do).
+        // A shop qualifies with at least one live offer, visible product, or
+        // visible combo. Explicit search/category browsing skips this filter.
+        if (! empty($filters['withContent'])) {
+            $query->where(function ($q): void {
+                $q->whereHas('offers', fn ($o) => $o->live())
+                    ->orWhereHas('products', fn ($p) => $p->where('is_visible', true))
+                    ->orWhereHas('combos', fn ($c) => $c->where('is_visible', true));
+            });
         }
 
         $favoriteIds = $user

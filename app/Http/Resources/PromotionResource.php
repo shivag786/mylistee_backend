@@ -7,6 +7,7 @@ use App\Enums\PromotionType;
 use App\Models\Promotion;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * @mixin Promotion
@@ -30,6 +31,12 @@ class PromotionResource extends JsonResource
             'status' => $status,
             'productId' => $this->whenLoaded('product', fn () => $this->product?->uuid),
             'productName' => $this->whenLoaded('product', fn () => $this->product?->name),
+            'productImage' => $this->whenLoaded(
+                'product',
+                fn () => $this->product?->image_path
+                    ? Storage::disk('public')->url($this->product->image_path)
+                    : null,
+            ),
             'discountType' => $config['discount_type'] ?? null,
             'value' => isset($config['value']) ? (float) $config['value'] : null,
             'buyQty' => $config['buy_qty'] ?? null,

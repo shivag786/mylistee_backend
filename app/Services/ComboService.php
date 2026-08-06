@@ -15,7 +15,10 @@ use Illuminate\Validation\ValidationException;
  */
 class ComboService
 {
-    public function __construct(private readonly ImageStorageService $images) {}
+    public function __construct(
+        private readonly ImageStorageService $images,
+        private readonly PlanLimitService $limits,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $data
@@ -23,6 +26,12 @@ class ComboService
      */
     public function create(Business $business, array $data, array $items, ?UploadedFile $image, User $actor): Combo
     {
+        // A new combo is visible by default; block if the plan's active-combo
+        // quota is full (never deletes existing combos — they stay inactive).
+        if (($data['is_visible'] ?? true)) {
+            $this->limits->assertCanActivateCombo($business);
+        }
+
         return DB::transaction(function () use ($business, $data, $items, $image, $actor): Combo {
             $combo = new Combo($this->attributes($data));
             $combo->business_id = $business->id;
@@ -50,6 +59,11 @@ class ComboService
      */
     public function update(Combo $combo, array $data, ?array $items, ?UploadedFile $image, User $actor): Combo
     {
+        // Turning a hidden combo back on counts against the plan's active quota.
+        if (array_key_exists('is_visible', $data) && $data['is_visible'] && ! $combo->is_visible) {
+            $this->limits->assertCanActivateCombo($combo->business);
+        }
+
         return DB::transaction(function () use ($combo, $data, $items, $image, $actor): Combo {
             $combo->fill($this->attributes($data));
             $combo->updated_by = $actor->id;

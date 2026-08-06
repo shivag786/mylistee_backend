@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
 use App\Http\Controllers\Api\V1\Admin\OfferController as AdminOfferController;
 use App\Http\Controllers\Api\V1\Admin\PlanController as AdminPlanController;
 use App\Http\Controllers\Api\V1\Admin\ReportController;
+use App\Http\Controllers\Api\V1\Admin\RevenueController;
 use App\Http\Controllers\Api\V1\Admin\ReviewController as AdminReviewController;
 use App\Http\Controllers\Api\V1\Admin\SettingController;
 use App\Http\Controllers\Api\V1\AuthController;
@@ -33,6 +34,8 @@ use App\Http\Controllers\Api\V1\Business\ProductController;
 use App\Http\Controllers\Api\V1\Business\PromotionController;
 use App\Http\Controllers\Api\V1\Business\QrController;
 use App\Http\Controllers\Api\V1\Business\RedemptionController;
+use App\Http\Controllers\Api\V1\Business\ServiceSettingController;
+use App\Http\Controllers\Api\V1\Business\TableController;
 use App\Http\Controllers\Api\V1\Business\ReviewController as OwnerReviewController;
 use App\Http\Controllers\Api\V1\Business\SubscriptionController;
 use App\Http\Controllers\Api\V1\CategoryController;
@@ -71,6 +74,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('deals', [DealController::class, 'index'])->name('deals.index');
     Route::get('combos', [ComboFeedController::class, 'index'])->name('combos.feed');
     Route::get('config', [ConfigController::class, 'index'])->name('config.index');
+    Route::get('banners', [\App\Http\Controllers\Api\V1\BannerController::class, 'index'])->name('banners.index');
 
     // Auth (document/phase/12 §Firebase Login Flow)
     Route::prefix('auth')->group(function (): void {
@@ -208,6 +212,17 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('orders', [OwnerOrderController::class, 'index'])->name('orders.index');
             Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
 
+            // Service modes + delivery fee (Phase 7.6 — table/service layer)
+            Route::get('service-settings', [ServiceSettingController::class, 'show'])->name('service-settings.show');
+            Route::put('service-settings', [ServiceSettingController::class, 'update'])->name('service-settings.update');
+
+            // Dining tables (Phase 7.6) — literal `reorder` before {uuid}
+            Route::get('tables', [TableController::class, 'index'])->name('tables.index');
+            Route::post('tables', [TableController::class, 'store'])->name('tables.store');
+            Route::patch('tables/reorder', [TableController::class, 'reorder'])->name('tables.reorder');
+            Route::put('tables/{uuid}', [TableController::class, 'update'])->name('tables.update');
+            Route::delete('tables/{uuid}', [TableController::class, 'destroy'])->name('tables.destroy');
+
             // Promotions — "Grow Sales" engine (Phase 7.2b)
             Route::get('promotions', [PromotionController::class, 'index'])->name('promotions.index');
             Route::post('promotions', [PromotionController::class, 'store'])->name('promotions.store');
@@ -296,17 +311,30 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('reviews/{uuid}/status', [AdminReviewController::class, 'updateStatus'])->name('reviews.status');
 
             // Plans & subscriptions
+            Route::get('revenue', [RevenueController::class, 'index'])->name('revenue.index');
             Route::get('plans', [AdminPlanController::class, 'index'])->name('plans.index');
+            Route::post('plans', [AdminPlanController::class, 'store'])->name('plans.store');
             Route::patch('plans/{key}', [AdminPlanController::class, 'update'])->name('plans.update');
 
             // Broadcast notifications
             Route::post('broadcast', [BroadcastController::class, 'store'])->name('broadcast');
+
+            // Homepage advertisement banners
+            Route::get('banners', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'index'])->name('banners.index');
+            Route::post('banners', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'store'])->name('banners.store');
+            Route::patch('banners/reorder', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'reorder'])->name('banners.reorder');
+            Route::post('banners/{uuid}', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'update'])->name('banners.update'); // POST + _method for multipart
+            Route::put('banners/{uuid}', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'update']);
+            Route::patch('banners/{uuid}/toggle', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'toggle'])->name('banners.toggle');
+            Route::delete('banners/{uuid}', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'destroy'])->name('banners.destroy');
 
             // Feature flags + platform settings + CMS
             Route::get('feature-flags', [FeatureFlagController::class, 'index'])->name('flags.index');
             Route::patch('feature-flags/{key}', [FeatureFlagController::class, 'update'])->name('flags.update');
             Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
             Route::put('settings', [SettingController::class, 'update'])->name('settings.update');
+            Route::post('settings/order-sound', [SettingController::class, 'uploadOrderSound'])->name('settings.order-sound.upload');
+            Route::delete('settings/order-sound', [SettingController::class, 'deleteOrderSound'])->name('settings.order-sound.delete');
             Route::get('cms', [CmsController::class, 'index'])->name('cms.index');
             Route::get('cms/{slug}', [CmsController::class, 'show'])->name('cms.show');
             Route::put('cms/{slug}', [CmsController::class, 'update'])->name('cms.update');

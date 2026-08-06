@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Api\V1;
 
+use App\Enums\OrderStatus;
 use App\Models\Business;
 use App\Models\BusinessCategory;
 use App\Models\Offer;
+use App\Models\Order;
 use App\Models\Review;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -147,6 +149,13 @@ class DiscoveryTest extends TestCase
         $customer = User::factory()->create();
         $business = Business::factory()->create();
         $token = $this->token($customer);
+
+        // Reviews are a verified purchase — the customer needs a fulfilled order.
+        Order::factory()->create([
+            'business_id' => $business->id,
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::Paid,
+        ]);
 
         $this->withToken($token)->postJson('/api/v1/reviews', [
             'businessSlug' => $business->slug, 'rating' => 5, 'comment' => 'Great!',

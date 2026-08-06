@@ -75,6 +75,12 @@ class Combo extends Model
         return $this->hasMany(ComboItem::class);
     }
 
+    /** Order lines referencing this combo — powers the "most ordered" badge. @return HasMany<OrderItem, $this> */
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+
     /** Sum of member products' selling price × quantity (uses loaded items). */
     public function totalPrice(): float
     {

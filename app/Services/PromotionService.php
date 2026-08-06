@@ -17,6 +17,8 @@ use Illuminate\Support\Carbon;
  */
 class PromotionService
 {
+    public function __construct(private readonly PlanLimitService $limits) {}
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -30,6 +32,13 @@ class PromotionService
         $promotion->auto_start ??= true;
         $promotion->auto_stop ??= true;
         $promotion->status = $this->initialStatus($promotion);
+
+        // A promotion that would go live (running/scheduled) counts against the
+        // plan's active-promotion quota. Never deletes existing ones.
+        if (in_array($promotion->status, [PromotionStatus::Running, PromotionStatus::Scheduled], true)) {
+            $this->limits->assertCanActivatePromotion($business);
+        }
+
         $promotion->save();
 
         return $promotion->fresh(['product']);
@@ -62,7 +71,15 @@ class PromotionService
     /** Resume a paused promotion, recomputing whether it should run now. */
     public function resume(Promotion $promotion): Promotion
     {
-        $promotion->update(['status' => $this->initialStatus($promotion)]);
+        $next = $this->initialStatus($promotion);
+
+        // Resuming into an active slot must respect the plan quota (this
+        // promotion is currently paused, so it isn't already counted).
+        if (in_array($next, [PromotionStatus::Running, PromotionStatus::Scheduled], true)) {
+            $this->limits->assertCanActivatePromotion($promotion->business);
+        }
+
+        $promotion->update(['status' => $next]);
 
         return $promotion;
     }

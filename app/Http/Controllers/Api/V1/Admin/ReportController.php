@@ -18,7 +18,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class ReportController extends Controller
 {
-    private const TYPES = ['businesses', 'customers', 'offers', 'invoices'];
+    private const TYPES = ['businesses', 'customers', 'offers', 'invoices', 'revenue'];
 
     public function __construct(private readonly AuditService $audit) {}
 
@@ -38,6 +38,7 @@ class ReportController extends Controller
                 'customers' => $this->customers($out),
                 'offers' => $this->offers($out),
                 'invoices' => $this->invoices($out),
+                'revenue' => $this->revenue($out),
             };
             fclose($out);
         }, $filename, ['Content-Type' => 'text/csv']);
@@ -96,6 +97,32 @@ class ReportController extends Controller
                 $o->created_at?->toDateString(),
             ]);
         });
+    }
+
+    /** @param  resource  $out — one row per subscription (the admin Revenue page). */
+    private function revenue($out): void
+    {
+        fputcsv($out, ['Business', 'Plan', 'Price', 'Currency', 'Cycle', 'Status', 'Auto-renew', 'Total paid', 'Started', 'Renews/Ends']);
+        \App\Models\Subscription::with(['business:id,name', 'plan:id,name'])
+            ->withSum(
+                ['invoices as total_paid' => fn ($q) => $q->where('status', \App\Enums\InvoiceStatus::Paid->value)],
+                'amount',
+            )
+            ->cursor()
+            ->each(function (\App\Models\Subscription $s) use ($out): void {
+                fputcsv($out, [
+                    $s->business?->name,
+                    $s->plan?->name ?? $s->plan_name,
+                    $s->price,
+                    $s->currency,
+                    $s->interval,
+                    $s->status instanceof \App\Enums\SubscriptionStatus ? $s->status->value : $s->status,
+                    $s->auto_renew ? 'yes' : 'no',
+                    $s->total_paid ?? 0,
+                    $s->starts_at?->toDateString(),
+                    $s->ends_at?->toDateString(),
+                ]);
+            });
     }
 
     /** @param  resource  $out */

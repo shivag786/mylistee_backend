@@ -88,6 +88,12 @@ class Product extends Model
         return $this->hasMany(Promotion::class);
     }
 
+    /** Order lines referencing this product — powers the "most ordered" badge. @return HasMany<OrderItem, $this> */
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+
     /**
      * The best currently-active price promotion for this product, or null. Uses
      * the loaded `promotions` relation when present to avoid extra queries.

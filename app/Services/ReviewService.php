@@ -4,23 +4,32 @@ namespace App\Services;
 
 use App\Enums\CoinSource;
 use App\Models\Business;
+use App\Models\Order;
 use App\Models\Review;
 use App\Models\User;
 
 /**
- * Customer reviews (document/phase/02 §Reviews). One review per customer per
- * business; the business's cached rating is recomputed on every change.
+ * Customer reviews (document/phase/02 §Reviews). Reviews are a verified purchase:
+ * a customer can only review a shop they have a paid/completed order with, and the
+ * review is linked to that order. One editable review per customer per business
+ * (so a repeat customer can't skew the average); the cached rating is recomputed
+ * on every change.
  */
 class ReviewService
 {
     public function __construct(private readonly LoyaltyService $loyalty) {}
 
-    /** Create or update the customer's review for a business. */
-    public function upsert(User $user, Business $business, int $rating, ?string $comment): Review
+    /** Create or update the customer's review for a business, tied to a verifying order. */
+    public function upsert(User $user, Business $business, int $rating, ?string $comment, ?Order $order = null): Review
     {
         $review = Review::updateOrCreate(
             ['business_id' => $business->id, 'customer_id' => $user->id],
-            ['rating' => $rating, 'comment' => $comment, 'status' => 'published'],
+            [
+                'order_id' => $order?->id,
+                'rating' => $rating,
+                'comment' => $comment,
+                'status' => 'published',
+            ],
         );
 
         $business->recalculateRating();

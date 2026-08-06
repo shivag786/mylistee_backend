@@ -5,8 +5,11 @@ namespace App\Services;
 use App\Enums\CoinSource;
 use App\Enums\NotificationType;
 use App\Enums\OrderStatus;
+use App\Enums\PaymentMethod;
 use App\Enums\RewardStatus;
+use App\Enums\ServiceType;
 use App\Models\Business;
+use App\Models\BusinessTable;
 use App\Models\Combo;
 use App\Models\Order;
 use App\Models\Reward;
@@ -31,17 +34,31 @@ class OrderService
      * Place an order. `$items` is `[{type: 'product'|'combo', id: uuid, quantity}]`.
      * Prices are snapshotted from the current effective price / combo price.
      *
+     * The service context (mode / table / address) is an additive layer: it never
+     * changes how items, coins, or the token work — only how the order is served.
+     *
      * @param  array<int, array{type: string, id: string, quantity?: int}>  $items
      *
      * @throws ValidationException
      */
-    public function place(Business $business, User $customer, array $items, int $coinsToUse = 0, ?string $note = null): Order
-    {
+    public function place(
+        Business $business,
+        User $customer,
+        array $items,
+        int $coinsToUse = 0,
+        ?string $note = null,
+        ?ServiceType $serviceType = null,
+        ?string $tableUuid = null,
+        ?string $serviceAddress = null,
+    ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Your cart is empty.']]);
         }
 
-        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note): Order {
+        [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
+        $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
+
+        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee): Order {
             $lines = [];
             $subtotal = 0.0;
             $coinsEarned = 0;
@@ -102,13 +119,17 @@ class OrderService
                 'token' => $this->uniqueToken($business),
                 'business_id' => $business->id,
                 'customer_id' => $customer->id,
+                'table_id' => $table?->id,
                 'status' => OrderStatus::Placed,
+                'service_type' => $serviceType,
                 'subtotal' => $subtotal,
                 'coins_used' => $coinsUsed,
                 'coin_discount' => $coinDiscount,
-                'total' => round($subtotal - $coinDiscount, 2),
+                'total' => round($subtotal - $coinDiscount + $deliveryFee, 2),
+                'delivery_fee' => $deliveryFee,
                 'coins_earned' => $coinsEarned,
                 'note' => $note,
+                'service_address' => $serviceAddress,
                 'placed_at' => Carbon::now(),
             ]);
 
@@ -124,7 +145,7 @@ class OrderService
                 $this->notifications->notify(
                     $business->owner,
                     NotificationType::OrderPlaced,
-                    "New order {$order->token}",
+                    "New order {$order->token} · {$order->serviceLabel()}",
                     "₹{$order->total} · {$order->items()->count()} item(s).",
                     ['link' => '/business/orders'],
                 );
@@ -135,11 +156,49 @@ class OrderService
     }
 
     /**
+     * Validate and normalise the service context against what the business offers.
+     * Returns `[ServiceType, ?BusinessTable, ?string address]`.
+     *
+     * @return array{0: ServiceType, 1: ?BusinessTable, 2: ?string}
+     *
+     * @throws ValidationException
+     */
+    private function resolveService(Business $business, ?ServiceType $serviceType, ?string $tableUuid, ?string $serviceAddress): array
+    {
+        // Default to the business's preferred mode when the client sends none.
+        $serviceType ??= $business->serviceModes()[0] ?? ServiceType::default();
+
+        if (! $business->offersService($serviceType)) {
+            throw ValidationException::withMessages([
+                'serviceType' => ["This shop doesn't offer {$serviceType->label()}."],
+            ]);
+        }
+
+        $table = null;
+        if ($tableUuid !== null && $tableUuid !== '') {
+            if ($serviceType !== ServiceType::DineIn) {
+                throw ValidationException::withMessages(['table' => ['A table can only be set for dine-in orders.']]);
+            }
+            $table = $business->tables()->where('uuid', $tableUuid)->where('status', 'active')->first();
+            if ($table === null) {
+                throw ValidationException::withMessages(['table' => ['That table is not available.']]);
+            }
+        }
+
+        $serviceAddress = $serviceType === ServiceType::Delivery ? trim((string) $serviceAddress) : null;
+        if ($serviceType === ServiceType::Delivery && $serviceAddress === '') {
+            throw ValidationException::withMessages(['serviceAddress' => ['A delivery address is required.']]);
+        }
+
+        return [$serviceType, $table, $serviceAddress ?: null];
+    }
+
+    /**
      * Move an order to the next state. Enforces the allowed transitions.
      *
      * @throws ValidationException
      */
-    public function transition(Order $order, OrderStatus $to, User $actor): Order
+    public function transition(Order $order, OrderStatus $to, User $actor, ?PaymentMethod $paymentMethod = null): Order
     {
         $allowed = match ($order->status) {
             OrderStatus::Placed => [OrderStatus::Confirmed, OrderStatus::Cancelled],
@@ -154,10 +213,10 @@ class OrderService
             ]);
         }
 
-        return DB::transaction(function () use ($order, $to, $actor): Order {
+        return DB::transaction(function () use ($order, $to, $actor, $paymentMethod): Order {
             match ($to) {
                 OrderStatus::Confirmed => $order->update(['status' => $to, 'confirmed_at' => Carbon::now()]),
-                OrderStatus::Paid => $this->markPaid($order, $actor),
+                OrderStatus::Paid => $this->markPaid($order, $actor, $paymentMethod),
                 OrderStatus::Completed => $order->update(['status' => $to, 'completed_at' => Carbon::now()]),
                 OrderStatus::Cancelled => $this->markCancelled($order),
                 default => null,
@@ -167,12 +226,14 @@ class OrderService
         });
     }
 
-    private function markPaid(Order $order, User $actor): void
+    private function markPaid(Order $order, User $actor, ?PaymentMethod $paymentMethod = null): void
     {
         $order->update([
             'status' => OrderStatus::Paid,
             'paid_at' => Carbon::now(),
             'paid_by' => $actor->id,
+            // Default to cash when the owner didn't specify — the common counter case.
+            'payment_method' => $paymentMethod ?? PaymentMethod::Cod,
         ]);
 
         // Credit the coins the combos promised.

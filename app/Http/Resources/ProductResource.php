@@ -22,6 +22,11 @@ class ProductResource extends JsonResource
         $selling = (float) $this->selling_price;
         $foodType = $this->food_type instanceof FoodType ? $this->food_type->value : $this->food_type;
 
+        // "Most ordered" social proof — present only when the count was loaded
+        // (public menu). null elsewhere so owner/admin payloads stay unaffected.
+        $orderCount = $this->resource->getAttribute('order_count');
+        $orderCount = $orderCount !== null ? (int) $orderCount : null;
+
         return [
             'id' => $this->uuid,
             'name' => $this->name,
@@ -66,6 +71,8 @@ class ProductResource extends JsonResource
             'isTodaysSpecial' => (bool) $this->is_todays_special,
             'isBestseller' => (bool) $this->is_bestseller,
             'isRecommended' => (bool) $this->is_recommended,
+            'orderCount' => $orderCount,
+            'isPopular' => $orderCount !== null && $orderCount >= (int) config('orders.popular.threshold', 5),
             'inStock' => (bool) $this->in_stock,
             'isVisible' => (bool) $this->is_visible,
             'position' => (int) $this->position,

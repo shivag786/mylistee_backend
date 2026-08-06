@@ -183,6 +183,64 @@ class AdminTest extends TestCase
             ->assertJsonPath('data.title', 'About Listee');
     }
 
+    public function test_admin_uploads_order_sound_and_it_surfaces_in_config(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+        $admin = $this->admin();
+
+        // Upload → stored + exposed to the public app config.
+        $this->withToken($this->token($admin))
+            ->postJson('/api/v1/admin/settings/order-sound', [
+                'sound' => \Illuminate\Http\Testing\File::create('ding.mp3', 8, 'audio/mpeg'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.orderSoundUrl', fn ($url) => is_string($url) && $url !== '');
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.orderSoundUrl', fn ($url) => is_string($url) && $url !== '');
+
+        // Remove → back to the built-in ding (null).
+        $this->withToken($this->token($admin))
+            ->deleteJson('/api/v1/admin/settings/order-sound')
+            ->assertOk()
+            ->assertJsonPath('data.orderSoundUrl', null);
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.orderSoundUrl', null);
+    }
+
+    public function test_order_sound_upload_rejects_non_audio(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+
+        $this->withToken($this->token($this->admin()))
+            ->postJson('/api/v1/admin/settings/order-sound', [
+                'sound' => \Illuminate\Http\Testing\File::create('evil.php', 4, 'text/x-php'),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['sound']);
+    }
+
+    public function test_owner_menu_module_toggle_reflects_in_public_config(): void
+    {
+        // Default: every owner module is on.
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.ownerModules.orders', true);
+
+        // Admin hides the Orders module from owners.
+        $this->withToken($this->token($this->admin()))
+            ->patchJson('/api/v1/admin/feature-flags/owner_orders', ['enabled' => false])
+            ->assertOk();
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.ownerModules.orders', false)
+            ->assertJsonPath('data.ownerModules.products', true);
+    }
+
     public function test_audit_log_endpoint_lists_actions(): void
     {
         $admin = $this->admin();

@@ -22,6 +22,11 @@ class SettingService
         'defaultLanguage' => 'en',
         'maintenanceMode' => false,
         'maintenanceMessage' => "We'll be back shortly.",
+        // Custom new-order alert sound (uploaded by an admin). URL is public; the
+        // disk path is kept so the old file can be replaced/removed. Null = the
+        // built-in synthesized "ding".
+        'orderSoundUrl' => null,
+        'orderSoundPath' => null,
     ];
 
     /**

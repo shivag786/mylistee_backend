@@ -26,6 +26,9 @@ class PlanResource extends JsonResource
             'interval' => $this->interval,
             'limits' => [
                 'maxActiveOffers' => $this->max_active_offers,
+                'maxActiveCombos' => $this->max_active_combos,
+                'maxActivePromotions' => $this->max_active_promotions,
+                'maxPushPerMonth' => $this->max_push_per_month,
                 'maxOfferDays' => $this->max_offer_days,
                 'maxQrCodes' => $this->max_qr_codes,
                 'maxGalleryImages' => $this->max_gallery_images,

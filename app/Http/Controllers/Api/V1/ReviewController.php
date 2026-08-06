@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\OrderStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ReviewResource;
 use App\Models\Business;
@@ -34,17 +35,44 @@ class ReviewController extends Controller
         return ApiResponse::success(ReviewResource::collection($reviews), 'Reviews.');
     }
 
-    /** POST /reviews { businessSlug, rating, comment } — create/update own review. */
+    /**
+     * POST /reviews { orderId?, businessSlug?, rating, comment } — create/update own
+     * review. Verified purchase: the customer must have a paid/completed order at
+     * the shop, and the review is linked to that order.
+     */
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'businessSlug' => ['required', 'string', Rule::exists('businesses', 'slug')],
+            'orderId' => ['nullable', 'string'],
+            'businessSlug' => ['nullable', 'string', Rule::exists('businesses', 'slug')],
             'rating' => ['required', 'integer', 'min:1', 'max:5'],
             'comment' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $business = Business::where('slug', $data['businessSlug'])->firstOrFail();
-        $review = $this->reviews->upsert($request->user(), $business, $data['rating'], $data['comment'] ?? null);
+        $user = $request->user();
+        $fulfilled = [OrderStatus::Paid->value, OrderStatus::Completed->value];
+
+        if (! empty($data['orderId'])) {
+            $order = $user->orders()->whereIn('status', $fulfilled)->where('uuid', $data['orderId'])->first();
+            if ($order === null) {
+                return ApiResponse::error('You can only review an order you have completed.', status: 403);
+            }
+            $business = $order->business;
+        } elseif (! empty($data['businessSlug'])) {
+            $business = Business::where('slug', $data['businessSlug'])->firstOrFail();
+            $order = $user->orders()
+                ->where('business_id', $business->id)
+                ->whereIn('status', $fulfilled)
+                ->latest('id')
+                ->first();
+            if ($order === null) {
+                return ApiResponse::error('Only customers who have ordered here can leave a review.', status: 403);
+            }
+        } else {
+            return ApiResponse::error('An order is required to leave a review.', status: 422);
+        }
+
+        $review = $this->reviews->upsert($user, $business, $data['rating'], $data['comment'] ?? null, $order);
 
         return ApiResponse::success(new ReviewResource($review), 'Thanks for your review!', status: 201);
     }

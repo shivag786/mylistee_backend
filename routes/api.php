@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Admin\CustomerController as AdminCustomerControl
 use App\Http\Controllers\Api\V1\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
 use App\Http\Controllers\Api\V1\Admin\OfferController as AdminOfferController;
+use App\Http\Controllers\Api\V1\Admin\PaymentController as AdminPaymentController;
 use App\Http\Controllers\Api\V1\Admin\PlanController as AdminPlanController;
 use App\Http\Controllers\Api\V1\Admin\ReportController;
 use App\Http\Controllers\Api\V1\Admin\RevenueController;
@@ -38,6 +39,7 @@ use App\Http\Controllers\Api\V1\Business\ServiceSettingController;
 use App\Http\Controllers\Api\V1\Business\TableController;
 use App\Http\Controllers\Api\V1\Business\ReviewController as OwnerReviewController;
 use App\Http\Controllers\Api\V1\Business\SubscriptionController;
+use App\Http\Controllers\Api\V1\Business\SubscriptionPaymentController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\PlanController;
 use App\Http\Controllers\Api\V1\DeviceTokenController;
@@ -48,6 +50,7 @@ use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
 use App\Http\Controllers\Api\V1\WalletTokenController;
+use App\Http\Controllers\Api\V1\Webhooks\RazorpayWebhookController;
 use App\Http\Controllers\Api\V1\LoyaltyController as CustomerLoyaltyController;
 use App\Http\Controllers\Api\V1\SpinnerController;
 use App\Http\Controllers\Api\V1\WalletController;
@@ -75,6 +78,16 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('combos', [ComboFeedController::class, 'index'])->name('combos.feed');
     Route::get('config', [ConfigController::class, 'index'])->name('config.index');
     Route::get('banners', [\App\Http\Controllers\Api\V1\BannerController::class, 'index'])->name('banners.index');
+
+    // Razorpay server-to-server webhook. Unauthenticated by necessity — the HMAC
+    // over the raw body is the authentication (see RazorpayWebhookController).
+    // Opted out of the group's `throttle:api` and given its own higher ceiling:
+    // a burst of settlement events must not be 429'd into the retry queue, and
+    // the signature check already rejects anything that is not really Razorpay.
+    Route::post('webhooks/razorpay', RazorpayWebhookController::class)
+        ->withoutMiddleware('throttle:api')
+        ->middleware('throttle:300,1')
+        ->name('webhooks.razorpay');
 
     // Auth (document/phase/12 §Firebase Login Flow)
     Route::prefix('auth')->group(function (): void {
@@ -172,6 +185,18 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('subscription', [SubscriptionController::class, 'store'])->name('subscription.store');
             Route::post('subscription/cancel', [SubscriptionController::class, 'cancel'])->name('subscription.cancel');
             Route::get('invoices', [SubscriptionController::class, 'invoices'])->name('invoices');
+
+            // Razorpay checkout for paid plans. Rate-limited harder than the rest
+            // of the API: each call creates a real order at the gateway.
+            Route::post('subscription/checkout', [SubscriptionPaymentController::class, 'checkout'])
+                ->middleware('throttle:10,1')
+                ->name('subscription.checkout');
+            Route::post('subscription/verify', [SubscriptionPaymentController::class, 'verify'])
+                ->middleware('throttle:20,1')
+                ->name('subscription.verify');
+            Route::post('subscription/payment-failed', [SubscriptionPaymentController::class, 'failed'])
+                ->middleware('throttle:20,1')
+                ->name('subscription.payment-failed');
 
             Route::post('gallery', [BusinessGalleryController::class, 'store'])->name('gallery.store');
             Route::delete('gallery/{uuid}', [BusinessGalleryController::class, 'destroy'])->name('gallery.destroy');
@@ -315,6 +340,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('plans', [AdminPlanController::class, 'index'])->name('plans.index');
             Route::post('plans', [AdminPlanController::class, 'store'])->name('plans.store');
             Route::patch('plans/{key}', [AdminPlanController::class, 'update'])->name('plans.update');
+
+            // Gateway payments + refunds (refund policy enforcement)
+            Route::get('payments', [AdminPaymentController::class, 'index'])->name('payments.index');
+            Route::post('payments/{uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
 
             // Broadcast notifications
             Route::post('broadcast', [BroadcastController::class, 'store'])->name('broadcast');

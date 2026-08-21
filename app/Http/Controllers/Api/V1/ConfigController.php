@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\FeatureFlag;
+use App\Services\RazorpayService;
 use App\Services\SettingService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +16,10 @@ use Illuminate\Http\JsonResponse;
  */
 class ConfigController extends Controller
 {
-    public function __construct(private readonly SettingService $settings) {}
+    public function __construct(
+        private readonly SettingService $settings,
+        private readonly RazorpayService $razorpay,
+    ) {}
 
     /** GET /config */
     public function index(): JsonResponse
@@ -34,6 +38,11 @@ class ConfigController extends Controller
             // Admin-configurable new-order alert sound for owners (null = built-in ding).
             'orderSoundUrl' => $this->settings->get('orderSoundUrl'),
             'ownerModules' => $ownerModules,
+            // Whether a live payment gateway is wired up. Only a boolean — no key
+            // is exposed here; the publishable key comes back from the checkout
+            // call itself. The owner UI uses this to decide between the paid
+            // checkout flow and the pre-gateway simulated upgrade (local/demo).
+            'payments' => ['razorpay' => $this->razorpay->isConfigured()],
         ], 'App config.');
     }
 }

@@ -7,6 +7,7 @@ use App\Enums\PromotionStatus;
 use App\Enums\SubscriptionStatus;
 use App\Models\Business;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\User;
@@ -14,11 +15,17 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Subscription lifecycle (document/phase/14 §Subscription Management). Payment is
- * a placeholder (phase/14 §Payment Management "Future") — upgrading records a
- * `paid` invoice immediately, no gateway. Plan resolution is lazy: a business
- * with no active subscription falls back to the default (free) plan, so no
- * back-fill is needed for businesses created before this milestone.
+ * Subscription lifecycle (document/phase/14 §Subscription Management).
+ *
+ * Activation is deliberately payment-agnostic: {@see self::subscribe()} takes an
+ * already-settled {@see Payment} and trusts it. Deciding that money actually
+ * landed is {@see SubscriptionPaymentService}'s job — so a paid plan can only go
+ * live behind a verified Razorpay capture, while free/downgrade switches and
+ * admin comps need no payment at all.
+ *
+ * Plan resolution is lazy: a business with no active subscription falls back to
+ * the default (free) plan, so no back-fill is needed for businesses created
+ * before this milestone.
  */
 class SubscriptionService
 {
@@ -46,10 +53,17 @@ class SubscriptionService
      * Move a business onto a plan. Paid plans create an active subscription and a
      * paid invoice; the free/default plan simply cancels any paid subscription
      * (the fallback handles the rest).
+     *
+     * @param  Payment|null  $payment  The settled gateway payment that bought this
+     *                                 period. Null means the switch was not paid
+     *                                 for here — a downgrade to free, or an
+     *                                 upgrade granted while no gateway is
+     *                                 configured (local/demo), which is recorded
+     *                                 on the invoice as `simulated`.
      */
-    public function subscribe(Business $business, Plan $plan, ?User $actor = null): ?Subscription
+    public function subscribe(Business $business, Plan $plan, ?User $actor = null, ?Payment $payment = null): ?Subscription
     {
-        return DB::transaction(function () use ($business, $plan, $actor): ?Subscription {
+        return DB::transaction(function () use ($business, $plan, $actor, $payment): ?Subscription {
             // End any current active subscription.
             $business->subscriptions()->active()->update([
                 'status' => SubscriptionStatus::Cancelled->value,
@@ -88,7 +102,15 @@ class SubscriptionService
                 'created_by' => $actor?->id,
             ]);
 
-            $this->recordInvoice($business, $subscription, $plan, $startsAt, $endsAt);
+            $invoice = $this->recordInvoice($business, $subscription, $plan, $startsAt, $endsAt, $payment);
+
+            // Close the loop so the payment row points at what it bought — this is
+            // what a refund later reverses.
+            $payment?->forceFill([
+                'invoice_id' => $invoice->id,
+                'subscription_id' => $subscription->id,
+            ])->save();
+
             $business->forgetPlanCache();
 
             return $subscription->load('plan');
@@ -184,27 +206,54 @@ class SubscriptionService
         Plan $plan,
         Carbon $periodStart,
         ?Carbon $periodEnd,
+        ?Payment $payment = null,
     ): Invoice {
+        // The gateway trail lives on the invoice too: a support agent reading the
+        // owner's billing history can jump straight to the Razorpay dashboard.
+        $meta = ['interval' => $plan->interval];
+        if ($payment !== null) {
+            $meta += [
+                'gateway' => $payment->gateway,
+                'gatewayOrderId' => $payment->gateway_order_id,
+                'gatewayPaymentId' => $payment->gateway_payment_id,
+                'method' => $payment->method,
+            ];
+        } else {
+            // No gateway involved — flagged so `simulated` rows are never mistaken
+            // for real revenue in the admin revenue report.
+            $meta['simulated'] = true;
+        }
+
         return $business->invoices()->create([
             'number' => $this->nextInvoiceNumber(),
             'subscription_id' => $subscription->id,
             'plan_name' => $plan->name,
-            'amount' => $plan->price,
+            'amount' => $payment !== null ? $payment->amount : $plan->price,
             'currency' => $plan->currency,
             'status' => InvoiceStatus::Paid,
             'period_start' => $periodStart->toDateString(),
             'period_end' => $periodEnd?->toDateString(),
             'issued_at' => now(),
             'paid_at' => now(),
-            'meta' => ['simulated' => true, 'interval' => $plan->interval],
+            'meta' => $meta,
         ]);
     }
 
-    /** Sequential invoice number, e.g. INV-2026-000042. */
+    /**
+     * Sequential invoice number, e.g. INV-2026-000042.
+     *
+     * `number` is unique and the count is not gap-free under concurrency, so a
+     * collision is retried rather than allowed to abort an upgrade the owner has
+     * already paid for.
+     */
     private function nextInvoiceNumber(): string
     {
         $year = now()->year;
         $seq = Invoice::count() + 1;
+
+        while (Invoice::where('number', sprintf('INV-%d-%06d', $year, $seq))->exists()) {
+            $seq++;
+        }
 
         return sprintf('INV-%d-%06d', $year, $seq);
     }

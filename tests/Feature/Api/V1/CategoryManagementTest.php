@@ -10,7 +10,6 @@ use App\Models\CategoryRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -64,20 +63,37 @@ class CategoryManagementTest extends TestCase
         Storage::disk('public')->assertExists($category->image_path);
     }
 
-    public function test_creating_a_category_busts_the_public_cache(): void
+    public function test_a_new_category_shows_on_the_public_endpoint_immediately(): void
     {
-        // Prime the public cache.
+        // Read once first — this used to prime a 6h cache, so a category added
+        // afterwards stayed invisible until the admin panel busted it. The
+        // public list is uncached now, and this guards that.
         $this->getJson('/api/v1/categories')->assertOk();
-        $this->assertTrue(Cache::has('categories.active'));
 
         $this->withToken($this->token($this->admin()))
             ->postJson('/api/v1/admin/categories', ['name' => 'Salon'])
             ->assertCreated();
 
-        $this->assertFalse(Cache::has('categories.active'));
         $this->getJson('/api/v1/categories')
             ->assertOk()
             ->assertJsonFragment(['name' => 'Salon']);
+    }
+
+    public function test_a_plan_edited_outside_the_admin_panel_is_visible_immediately(): void
+    {
+        // The public plans list was cached for 6 hours and only invalidated by
+        // the admin controller, so a price changed by any other route — a direct
+        // SQL edit, a seeder — kept serving the old figure. Prices must not go
+        // stale, so that cache is gone.
+        $this->seed(\Database\Seeders\PlanSeeder::class);
+
+        $this->getJson('/api/v1/plans')->assertOk();
+
+        \App\Models\Plan::where('key', 'pro')->update(['price' => 1999]);
+
+        $this->getJson('/api/v1/plans')
+            ->assertOk()
+            ->assertJsonFragment(['key' => 'pro', 'price' => 1999.0]);
     }
 
     public function test_admin_can_update_toggle_and_delete(): void

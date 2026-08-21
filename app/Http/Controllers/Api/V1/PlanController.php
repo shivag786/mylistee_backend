@@ -7,7 +7,6 @@ use App\Http\Resources\PlanResource;
 use App\Models\Plan;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * Public list of subscription plans for the pricing / upgrade screen
@@ -15,14 +14,19 @@ use Illuminate\Support\Facades\Cache;
  */
 class PlanController extends Controller
 {
-    /** Cache key for the public plans list — forgotten when an admin edits a plan. */
-    public const CACHE_KEY = 'plans.public';
-
-    /** GET /plans */
+    /**
+     * GET /plans
+     *
+     * Read straight from the database. This was cached for six hours, which
+     * meant a price edited outside the admin panel — a direct SQL change, say —
+     * kept showing the old figure. Prices are the one thing that must never be
+     * stale, and the query is a handful of rows.
+     */
     public function index(): JsonResponse
     {
-        $plans = Cache::remember(self::CACHE_KEY, now()->addHours(6), fn () => Plan::query()->public()->get());
-
-        return ApiResponse::success(PlanResource::collection($plans), 'Plans retrieved.');
+        return ApiResponse::success(
+            PlanResource::collection(Plan::query()->public()->get()),
+            'Plans retrieved.',
+        );
     }
 }

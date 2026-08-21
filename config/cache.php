@@ -13,9 +13,33 @@ return [
     | framework. This connection is utilized if another isn't explicitly
     | specified when running a cache operation inside the application.
     |
+    | Application caching is OFF here. Reads go straight to the database, so
+    | nothing is ever stale and there is no cache to clear. The store named
+    | "null" needs no entry under 'stores' below — CacheManager resolves that
+    | name straight to the null driver.
+    |
     */
 
-    'default' => env('CACHE_STORE', 'database'),
+    'default' => env('CACHE_STORE', 'null'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rate Limiter Store
+    |--------------------------------------------------------------------------
+    |
+    | The store the throttle middleware counts requests in. Kept SEPARATE from
+    | the default store on purpose: application caching is disabled
+    | (CACHE_STORE=null), but rate limiting needs somewhere durable to keep its
+    | counters or it silently stops limiting anything. That would leave the
+    | 4-digit PIN login with no brute-force protection.
+    |
+    | `file` needs no database table and no cache warm-up, so it survives the
+    | cache system being switched off. Point it at redis if you run multiple
+    | web servers — file counters are per-server.
+    |
+    */
+
+    'limiter' => env('CACHE_LIMITER', 'file'),
 
     /*
     |--------------------------------------------------------------------------

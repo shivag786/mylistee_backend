@@ -4,20 +4,16 @@ namespace App\Services;
 
 use App\Models\BusinessCategory;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
  * Master category management for the admin (Phase 7.1). Centralises create /
- * update / reorder and keeps the public `categories.active` cache (Milestone 15)
- * in sync so changes appear immediately on the customer side.
+ * update / reorder. The public category list is read uncached, so a change
+ * here is visible on the customer side on the very next request.
  */
 class CategoryService
 {
-    /** Cache key used by the public CategoryController. */
-    private const CACHE_KEY = 'categories.active';
-
     public function __construct(private readonly ImageStorageService $images) {}
 
     /**
@@ -38,7 +34,6 @@ class CategoryService
         }
 
         $category->save();
-        $this->bustCache();
 
         return $category;
     }
@@ -58,7 +53,6 @@ class CategoryService
         }
 
         $category->save();
-        $this->bustCache();
 
         return $category;
     }
@@ -67,7 +61,6 @@ class CategoryService
     {
         $this->images->delete($category->image_path);
         $category->delete();
-        $this->bustCache();
     }
 
     /**
@@ -84,7 +77,6 @@ class CategoryService
             }
         });
 
-        $this->bustCache();
     }
 
     /**
@@ -142,13 +134,8 @@ class CategoryService
         }
 
         $category->save();
-        $this->bustCache();
 
         return $category;
     }
 
-    private function bustCache(): void
-    {
-        Cache::forget(self::CACHE_KEY);
-    }
 }

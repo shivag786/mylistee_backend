@@ -23,6 +23,11 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
+        <!-- Rate-limit counters must not survive between tests. The app runs the
+             limiter on the file store (it outlives CACHE_STORE=null in production),
+             but a file store persists across the suite and leaks throttle state
+             from one test into the next. -->
+        <env name="CACHE_LIMITER" value="array"/>
         <env name="DB_CONNECTION" value="sqlite"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="DB_URL" value=""/>

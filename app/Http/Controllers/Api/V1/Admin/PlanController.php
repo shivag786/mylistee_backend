@@ -9,7 +9,6 @@ use App\Services\AuditService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * Plan & subscription management for the Super Admin (document/phase/14
@@ -66,7 +65,6 @@ class PlanController extends Controller
         ]);
 
         $plan = Plan::create($this->mapPayload($validated));
-        Cache::forget(\App\Http\Controllers\Api\V1\PlanController::CACHE_KEY);
         $this->audit->log($request->user(), 'plan.create', $plan, "Created plan {$plan->name}");
 
         return ApiResponse::success(new PlanResource($plan), 'Plan created.', status: 201);
@@ -101,8 +99,6 @@ class PlanController extends Controller
 
         $payload = $this->mapPayload($validated);
         $plan->update($payload);
-        // Public pricing page is cached — bust it so edits show immediately.
-        Cache::forget(\App\Http\Controllers\Api\V1\PlanController::CACHE_KEY);
         $this->audit->log($request->user(), 'plan.update', $plan, "Updated plan {$plan->name}", $payload);
 
         return ApiResponse::success(new PlanResource($plan->fresh()), 'Plan updated.');

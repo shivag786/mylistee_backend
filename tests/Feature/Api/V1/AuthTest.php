@@ -7,6 +7,7 @@ use App\Enums\UserStatus;
 use App\Models\User;
 use App\Services\FirebaseService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Mockery\MockInterface;
 use Tests\TestCase;
 
@@ -206,5 +207,83 @@ class AuthTest extends TestCase
             'provider' => 'dev',
             'role' => UserRole::BusinessOwner->value,
         ]);
+    }
+
+    public function test_owner_can_change_their_pin(): void
+    {
+        $user = User::factory()->create([
+            'role' => UserRole::BusinessOwner,
+            'status' => UserStatus::Active,
+            'pin' => '1234',
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/v1/auth/change-pin', [
+            'currentPin' => '1234',
+            'newPin' => '5678',
+        ]);
+
+        $response->assertOk()->assertJsonPath('success', true);
+
+        $user->refresh();
+        $this->assertTrue(Hash::check('5678', $user->pin));
+        $this->assertFalse(Hash::check('1234', $user->pin));
+    }
+
+    public function test_changing_the_pin_keeps_the_current_session_valid(): void
+    {
+        $user = User::factory()->create([
+            'role' => UserRole::BusinessOwner,
+            'status' => UserStatus::Active,
+            'pin' => '1234',
+        ]);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/auth/change-pin', ['currentPin' => '1234', 'newPin' => '5678'])
+            ->assertOk();
+
+        // The same token must still work — the owner is not signed out.
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/auth/me')
+            ->assertOk();
+    }
+
+    public function test_change_pin_rejects_a_wrong_current_pin(): void
+    {
+        $user = User::factory()->create([
+            'role' => UserRole::BusinessOwner,
+            'status' => UserStatus::Active,
+            'pin' => '1234',
+        ]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/change-pin', [
+            'currentPin' => '9999',
+            'newPin' => '5678',
+        ])->assertStatus(422)->assertJsonValidationErrors('currentPin');
+
+        $user->refresh();
+        $this->assertTrue(Hash::check('1234', $user->pin), 'PIN must be unchanged.');
+    }
+
+    public function test_change_pin_rejects_a_non_numeric_pin(): void
+    {
+        $user = User::factory()->create([
+            'role' => UserRole::BusinessOwner,
+            'status' => UserStatus::Active,
+            'pin' => '1234',
+        ]);
+
+        $this->actingAs($user)->postJson('/api/v1/auth/change-pin', [
+            'currentPin' => '1234',
+            'newPin' => 'abcd',
+        ])->assertStatus(422)->assertJsonValidationErrors('newPin');
+    }
+
+    public function test_change_pin_requires_authentication(): void
+    {
+        $this->postJson('/api/v1/auth/change-pin', [
+            'currentPin' => '1234',
+            'newPin' => '5678',
+        ])->assertStatus(401);
     }
 }

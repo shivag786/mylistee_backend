@@ -120,6 +120,11 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('become-owner', [AuthController::class, 'becomeOwner'])
                 ->middleware('throttle:10,1')
                 ->name('auth.become-owner');
+
+            // Change your own PIN (owners & admins sign in with one).
+            Route::post('change-pin', [AuthController::class, 'changePin'])
+                ->middleware('throttle:10,1')
+                ->name('auth.change-pin');
         });
     });
 

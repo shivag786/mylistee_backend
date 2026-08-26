@@ -86,6 +86,49 @@ class AuthService
         return $this->issueSession($user);
     }
 
+    /**
+     * Change the signed-in user's PIN. The current PIN is verified first, and
+     * the same per-account lockout as sign-in applies so this endpoint cannot
+     * be used to brute-force it. Existing tokens are left alone — the caller
+     * stays signed in on this device.
+     *
+     * `pin_plain` is kept in step with the hash because the admin panel reads it
+     * (demo only — see registerOwner).
+     *
+     * @throws ValidationException when the current PIN is wrong or locked out
+     */
+    public function changePin(User $user, string $currentPin, string $newPin): void
+    {
+        $key = 'pin-change:'.$user->id;
+
+        if (RateLimiter::tooManyAttempts($key, self::PIN_MAX_ATTEMPTS)) {
+            throw ValidationException::withMessages([
+                'currentPin' => [$this->lockoutMessage(RateLimiter::availableIn($key))],
+            ]);
+        }
+
+        if ($user->pin === null || ! Hash::check($currentPin, $user->pin)) {
+            RateLimiter::hit($key, self::PIN_DECAY_SECONDS);
+
+            throw ValidationException::withMessages([
+                'currentPin' => ['That is not your current PIN.'],
+            ]);
+        }
+
+        if (Hash::check($newPin, $user->pin)) {
+            throw ValidationException::withMessages([
+                'newPin' => ['Your new PIN must be different from the current one.'],
+            ]);
+        }
+
+        RateLimiter::clear($key);
+
+        $user->forceFill([
+            'pin' => $newPin,
+            'pin_plain' => $newPin,
+        ])->save();
+    }
+
     private const PIN_MAX_ATTEMPTS = 5;
 
     private const PIN_DECAY_SECONDS = 900;

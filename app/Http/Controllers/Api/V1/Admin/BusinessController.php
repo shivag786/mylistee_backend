@@ -84,6 +84,12 @@ class BusinessController extends Controller
             'category_id' => ['nullable', 'string'], // category uuid
             'description' => ['nullable', 'string', 'max:2000'],
             'address' => ['nullable', 'string', 'max:255'],
+            // Discovery sorts by distance, and a business without coordinates
+            // has none to sort by -- it sinks to the bottom of every nearby
+            // list. Admins need to be able to fill these in when an owner
+            // skipped them during registration.
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'phone' => ['nullable', 'string', 'max:20'],
             'email' => ['nullable', 'email', 'max:160'],
             'website' => ['nullable', 'string', 'max:200'],

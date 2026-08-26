@@ -275,4 +275,50 @@ class AdminTest extends TestCase
             ->getJson('/api/v1/admin/dashboard')
             ->assertStatus(403);
     }
+
+    public function test_admin_can_set_business_coordinates(): void
+    {
+        // A shop registered without coordinates: invisible to distance sorting
+        // until someone fills them in.
+        $business = Business::factory()->create(['latitude' => null, 'longitude' => null]);
+
+        $this->withToken($this->token($this->admin()))
+            ->putJson("/api/v1/admin/businesses/{$business->uuid}", [
+                'name' => $business->name,
+                'latitude' => 25.4484,
+                'longitude' => 78.5685,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.latitude', 25.4484)
+            ->assertJsonPath('data.longitude', 78.5685);
+
+        $business->refresh();
+        $this->assertSame('25.4484000', (string) $business->latitude);
+        $this->assertSame('78.5685000', (string) $business->longitude);
+    }
+
+    public function test_business_coordinates_are_validated(): void
+    {
+        $business = Business::factory()->create();
+
+        $this->withToken($this->token($this->admin()))
+            ->putJson("/api/v1/admin/businesses/{$business->uuid}", [
+                'name' => $business->name,
+                'latitude' => 999,
+                'longitude' => 78.5685,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('latitude');
+    }
+
+    public function test_admin_business_list_exposes_coordinates(): void
+    {
+        Business::factory()->create(['latitude' => 25.4484, 'longitude' => 78.5685]);
+
+        $this->withToken($this->token($this->admin()))
+            ->getJson('/api/v1/admin/businesses')
+            ->assertOk()
+            ->assertJsonPath('data.0.latitude', 25.4484)
+            ->assertJsonPath('data.0.longitude', 78.5685);
+    }
 }

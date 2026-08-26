@@ -1,0 +1,94 @@
+# ---------------------------------------------------------------------------
+# Root .htaccess -- for hosts whose document root is the project root rather
+# than public/. Everything is rewritten into public/, where Laravel's own
+# .htaccess takes over and hands the request to index.php.
+# ---------------------------------------------------------------------------
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Auth is Bearer-token based (Sanctum personal access tokens), so the
+    # Authorization header reaching PHP is load-bearing -- some CGI/FastCGI
+    # setups drop it. public/.htaccess repeats this; doing it here too is
+    # idempotent and covers the hop before the rewrite.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Answer CORS preflight here; never spin up PHP for an OPTIONS request.
+    RewriteCond %{REQUEST_METHOD} =OPTIONS
+    RewriteRule ^ - [R=204,L]
+
+    # Dotfiles are never served. .env alone leaks APP_KEY and the DB password.
+    # .well-known is excepted so Let's Encrypt renewals keep working.
+    # Note: the framework directories (app/, config/, storage/, vendor/ ...)
+    # need no deny rule -- the rewrite below prefixes EVERY url with public/,
+    # so /config/database.php resolves to public/config/database.php, which
+    # does not exist. Denying them by name would break real public urls:
+    # /storage/* is the public disk (config/filesystems.php) and packages
+    # publish assets into public/vendor/*.
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteRule (^|/)\. - [F,L]
+
+    # Serve the public disk without a symlink. `artisan storage:link` needs
+    # shell access, and this host has none -- but the document root IS the
+    # project root, so storage/app/public sits under it and Apache can reach
+    # it directly. /storage/banners/x.webp -> storage/app/public/banners/x.webp
+    #
+    # The (?!app/) lookahead does double duty: it stops the rewritten path from
+    # matching this same rule on the next pass ([L] restarts the pass in
+    # per-directory context, which would build storage/app/public/app/public/...),
+    # and it refuses a direct /storage/app/... probe. Nothing else under
+    # storage/ -- logs, framework caches, app/private -- is reachable, because
+    # every url is forced through the app/public prefix.
+    RewriteRule ^storage/(?!app/)(.*)$ storage/app/public/$1 [L]
+
+    # Route every request into public/. The guard is a negative lookahead on
+    # the rule pattern (matched against the path RELATIVE to this directory)
+    # rather than a RewriteCond on %{REQUEST_URI}: [L] in per-directory context
+    # restarts the rewrite pass, and REQUEST_URI's value after an internal
+    # redirect varies, which can loop into public/public/public/...
+    # storage/app/public/ is excluded as well as public/: the storage rule
+    # above rewrites into it, [L] restarts the pass, and without this exclusion
+    # that rewritten path gets the public/ prefix slapped on it -- producing
+    # public/storage/app/public/... which does not exist, so every image fell
+    # through to index.php and 404'd.
+    RewriteRule ^(?!public/|storage/app/public/)(.*)$ public/$1 [L]
+</IfModule>
+
+# ---------------------------------------------------------------------------
+# CORS -- trusted origins only. Credentials are sent (Sanctum SPA auth), so a
+# wildcard is not allowed; the Origin header is echoed back verbatim when, and
+# only when, it matches listee.org. Laravel's HandleCors middleware writes the
+# same headers, so each is unset first and this file stays the single source.
+# ---------------------------------------------------------------------------
+<IfModule mod_setenvif.c>
+    SetEnvIf Origin "^https://(www\.)?listee\.org$" CORS_ORIGIN=$0
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header unset Access-Control-Allow-Origin
+    Header unset Access-Control-Allow-Credentials
+    Header unset Access-Control-Allow-Methods
+    Header unset Access-Control-Allow-Headers
+    Header unset Access-Control-Max-Age
+
+    Header always set Access-Control-Allow-Origin %{CORS_ORIGIN}e env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Credentials "true" env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Headers "Origin, Content-Type, Accept, Authorization, X-Requested-With, X-XSRF-TOKEN, X-CSRF-TOKEN" env=CORS_ORIGIN
+    Header always set Access-Control-Max-Age "86400" env=CORS_ORIGIN
+
+    # A cache must never hand one origin's response to another.
+    Header always append Vary "Origin"
+</IfModule>
+
+# Belt-and-braces for the loose files that sit in the project root.
+<IfModule mod_authz_core.c>
+    <FilesMatch "(?i)^(\.env.*|composer\.(json|lock)|package(-lock)?\.json|artisan|phpunit\.xml|README\.md|.*\.result\.cache)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>

@@ -95,6 +95,25 @@ class AuthController extends Controller
     }
 
     /**
+     * Change the caller's own PIN. POST /api/v1/auth/change-pin
+     * (auth:sanctum + active, throttled). The current PIN is verified in the
+     * service; tokens are untouched so the caller stays signed in.
+     */
+    public function changePin(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'currentPin' => ['required', 'string', 'max:32'],
+            'newPin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/'],
+        ], [
+            'newPin.regex' => 'Your PIN must be digits only.',
+        ]);
+
+        $this->auth->changePin($request->user(), $validated['currentPin'], $validated['newPin']);
+
+        return ApiResponse::success(message: 'PIN updated.');
+    }
+
+    /**
      * The authenticated user. GET /api/v1/auth/me (auth:sanctum).
      */
     public function me(Request $request): JsonResponse

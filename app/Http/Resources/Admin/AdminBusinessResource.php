@@ -31,6 +31,10 @@ class AdminBusinessResource extends JsonResource
             // Editable business details (for the admin edit form).
             'description' => $this->description,
             'address' => $this->address,
+            // Returned so the admin edit form can show and correct them; a
+            // business missing either is invisible to distance sorting.
+            'latitude' => $this->latitude !== null ? (float) $this->latitude : null,
+            'longitude' => $this->longitude !== null ? (float) $this->longitude : null,
             'phone' => $this->phone,
             'email' => $this->email,
             'website' => $this->website,

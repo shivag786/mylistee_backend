@@ -30,4 +30,10 @@ class Favorite extends Model
     {
         return $this->belongsTo(Business::class);
     }
+
+    /** The customer who followed. @return BelongsTo<User, $this> */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'customer_id');
+    }
 }

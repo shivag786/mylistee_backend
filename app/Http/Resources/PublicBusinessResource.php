@@ -42,6 +42,11 @@ class PublicBusinessResource extends JsonResource
             'whatsapp' => $this->whatsapp,
             'averageRating' => (float) $this->average_rating,
             'totalReviews' => $this->total_reviews,
+            // Follow state for the Follow button. Same rows as favourites, read
+            // from the shop's side. `followers_count` is set by withCount() and
+            // `is_following` by the controller, which knows the viewer.
+            'followersCount' => (int) ($this->followers_count ?? 0),
+            'isFollowing' => (bool) ($this->is_following ?? false),
             'gallery' => GalleryImageResource::collection($this->whenLoaded('gallery')),
             'offers' => PublicOfferResource::collection($this->whenLoaded('liveOffers')),
             'menu' => $this->buildMenu(),

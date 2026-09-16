@@ -34,6 +34,10 @@ class ConfigController extends Controller
         return ApiResponse::success([
             'flags' => [
                 'homeCategoryFilter' => FeatureFlag::isEnabled('home_category_filter', true),
+                // Drives the install banner AND the service worker. Off means the
+                // client unregisters the worker and drops the manifest, so the
+                // app stops behaving as an installable PWA everywhere at once.
+                'pwa' => FeatureFlag::isEnabled('pwa', true),
             ],
             // Admin-configurable new-order alert sound for owners (null = built-in ding).
             'orderSoundUrl' => $this->settings->get('orderSoundUrl'),

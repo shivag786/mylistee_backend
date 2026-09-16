@@ -78,6 +78,7 @@ class PublicBusinessController extends Controller
                     ->orderBy('position')->latest('id')->with('items.product')
                     ->withSum(['orderItems as order_count' => fn ($oi) => $this->orderedRecently($oi)], 'quantity'),
             ])
+            ->withCount('followers')
             ->first();
 
         if ($business === null) {
@@ -87,6 +88,13 @@ class PublicBusinessController extends Controller
         // Optional auth: resolve the customer from a bearer token if one is
         // present, without requiring it (logged-out visitors still see the page).
         $user = $request->user('sanctum');
+
+        // Whether THIS viewer follows the shop, for the Follow button. A
+        // logged-out visitor is simply not following, and still sees the count.
+        $business->setAttribute(
+            'is_following',
+            $user !== null && $business->followers()->where('customer_id', $user->id)->exists(),
+        );
         $hasOffers = $business->liveOffers->isNotEmpty();
 
         // Count the profile open as a visit (document/phase/02 §Customer Visit).

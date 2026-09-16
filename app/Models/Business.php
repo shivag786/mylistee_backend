@@ -117,6 +117,18 @@ class Business extends Model
         return $this->hasMany(BusinessGallery::class)->orderBy('sort_order');
     }
 
+    /**
+     * The customers following this shop. Same rows as a customer's favourites
+     * -- one saved-shop relationship, read from the shop's side instead of the
+     * customer's, which is what the owner's Followers list shows.
+     *
+     * @return HasMany<Favorite, $this>
+     */
+    public function followers(): HasMany
+    {
+        return $this->hasMany(Favorite::class);
+    }
+
     /** @return HasMany<Offer, $this> */
     public function offers(): HasMany
     {

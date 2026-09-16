@@ -19,6 +19,7 @@ class FeatureFlagSeeder extends Seeder
         ['key' => 'favorites', 'name' => 'Favorites', 'description' => 'Bookmark businesses', 'enabled' => true],
         ['key' => 'push_notifications', 'name' => 'Push notifications', 'description' => 'Web push via FCM', 'enabled' => true],
         ['key' => 'home_category_filter', 'name' => 'Home category chips', 'description' => 'Show the category quick-filter row on the customer home page', 'enabled' => true],
+        ['key' => 'pwa', 'name' => 'Installable app (PWA)', 'description' => 'Install banner and offline service worker. Turning this off unregisters the service worker on every device and stops new installs.', 'enabled' => true],
         ['key' => 'referral_program', 'name' => 'Referral program', 'description' => 'Refer-a-friend rewards (roadmap)', 'enabled' => false],
         ['key' => 'scratch_cards', 'name' => 'Scratch cards', 'description' => 'Scratch-card rewards (roadmap)', 'enabled' => false],
         ['key' => 'loyalty', 'name' => 'Loyalty points', 'description' => 'Points-based loyalty (roadmap)', 'enabled' => false],

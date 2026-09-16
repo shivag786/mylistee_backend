@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\V1\ComboFeedController;
 use App\Http\Controllers\Api\V1\ConfigController;
 use App\Http\Controllers\Api\V1\DealController;
 use App\Http\Controllers\Api\V1\Business\AnalyticsController;
+use App\Http\Controllers\Api\V1\Business\FollowerController;
 use App\Http\Controllers\Api\V1\Business\BusinessController;
 use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
 use App\Http\Controllers\Api\V1\Business\CategoryRequestController as OwnerCategoryRequestController;
@@ -184,6 +185,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Analytics (document/phase/07 §Analytics, Milestone 12)
             Route::get('analytics', [AnalyticsController::class, 'index'])->name('analytics');
+
+            // Followers — the customers who followed this shop.
+            Route::get('followers', [FollowerController::class, 'index'])->name('followers.index');
 
             // Subscription & billing (document/phase/14, Milestone 13)
             Route::get('subscription', [SubscriptionController::class, 'index'])->name('subscription.show');

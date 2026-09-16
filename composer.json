@@ -75,6 +75,10 @@
         }
     },
     "config": {
+        "platform": {
+            "php": "8.3.33",
+            "ext-sodium": "2.0.23"
+        },
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,

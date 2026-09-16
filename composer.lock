@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e77cdf941140a397f62ad94f0af01783",
+    "content-hash": "35cb8a4eae12444092e39232237401e6",
     "packages": [
         {
             "name": "beste/clock",
@@ -9751,7 +9751,7 @@
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
-        "php": "^8.2"
+        "php": "^8.3"
     },
     "platform-dev": [],
     "plugin-api-version": "2.3.0"

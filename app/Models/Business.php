@@ -28,6 +28,7 @@ class Business extends Model
         'logo_path',
         'cover_path',
         'address',
+        'city',
         'latitude',
         'longitude',
         'opening_time',

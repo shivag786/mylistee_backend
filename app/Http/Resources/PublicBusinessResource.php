@@ -30,6 +30,7 @@ class PublicBusinessResource extends JsonResource
             'logoUrl' => $this->url($this->logo_path),
             'coverUrl' => $this->url($this->cover_path),
             'address' => $this->address,
+            'city' => $this->city,
             'latitude' => $this->latitude !== null ? (float) $this->latitude : null,
             'longitude' => $this->longitude !== null ? (float) $this->longitude : null,
             'openingTime' => $this->opening_time,

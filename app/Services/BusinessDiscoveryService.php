@@ -62,6 +62,21 @@ class BusinessDiscoveryService
             $query->whereHas('category', fn ($c) => $c->where('slug', $filters['category']));
         }
 
+        // City filter: a visitor in Pune has no use for shops in Mumbai.
+        //
+        // Businesses whose owner has not set a city yet are kept in the list.
+        // The column is new, so every existing shop has NULL -- filtering them
+        // out strictly would empty the app for everyone until each owner went
+        // and edited their profile. As cities get filled in, the NULL branch
+        // matches fewer and fewer rows and this becomes a plain equality check
+        // on its own.
+        if (! empty($filters['city'])) {
+            $city = $filters['city'];
+            $query->where(function ($q) use ($city): void {
+                $q->where('city', $city)->orWhereNull('city');
+            });
+        }
+
         // Recommended row: admin-verified shops only.
         if (! empty($filters['verified'])) {
             $query->where('verified', true);

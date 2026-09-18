@@ -27,6 +27,7 @@ class BusinessListItemResource extends JsonResource
             'name' => $this->name,
             'category' => $this->category?->name,
             'area' => $this->address,
+            'city' => $this->city,
             'coverImage' => $this->url($this->cover_path),
             // First product image (when loaded via discovery) — the card prefers
             // this over the banner. Null falls back to coverImage on the client.

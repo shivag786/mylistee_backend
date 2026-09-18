@@ -30,7 +30,7 @@ class PublicBusinessController extends Controller
     /** GET /businesses — discovery list (search / category / sort / nearby). */
     public function index(Request $request): JsonResponse
     {
-        $filters = $request->only(['search', 'category', 'sort', 'lat', 'lng', 'page', 'perPage', 'verified', 'new', 'withContent']);
+        $filters = $request->only(['search', 'category', 'city', 'sort', 'lat', 'lng', 'page', 'perPage', 'verified', 'new', 'withContent']);
         $page = $this->discovery->list($filters, $request->user('sanctum'));
 
         return ApiResponse::success(

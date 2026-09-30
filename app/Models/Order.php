@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -115,6 +116,39 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    /** Every Razorpay attempt for this order's online share. @return HasMany<Payment, $this> */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * The attempt that tells an admin where the money stands. A retried payment
+     * leaves failed attempts behind it; the latest one is the one that counts.
+     *
+     * @return HasOne<Payment, $this>
+     */
+    public function latestPayment(): HasOne
+    {
+        return $this->hasOne(Payment::class)->latestOfMany();
+    }
+
+    /**
+     * How the bill was settled, as one word: 'cod', 'online' (all of it) or
+     * 'partial' (an advance online, the rest at the counter).
+     *
+     * Orders from before online payment have no choice recorded; they were all
+     * cash, so they read as 'cod'.
+     */
+    public function paymentType(): string
+    {
+        if ($this->payment_choice !== 'online' || (float) $this->online_amount <= 0) {
+            return 'cod';
+        }
+
+        return (float) $this->online_amount < (float) $this->total ? 'partial' : 'online';
     }
 
     /**

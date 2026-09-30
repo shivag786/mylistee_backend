@@ -8,6 +8,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Business;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -345,6 +346,111 @@ class OrderPaymentService
     }
 
     /**
+     * Refund an order payment from the admin panel, all of it or part.
+     *
+     * A full refund withdraws the order too, if it is still in play -- otherwise
+     * the customer has their money back while the shop still sees a paid order
+     * to fulfil. Once the order is settled (marked paid or completed) a refund
+     * is goodwill: the money goes back and the order stands. A partial refund
+     * never touches the order.
+     *
+     * @throws ValidationException
+     */
+    public function adminRefund(Payment $payment, ?float $amount, User $actor, ?string $reason = null): Payment
+    {
+        if ($payment->status !== PaymentStatus::Captured) {
+            throw ValidationException::withMessages([
+                'payment' => ['Only a captured payment can be refunded.'],
+            ]);
+        }
+
+        $refundable = $payment->refundableAmount();
+        $amount ??= $refundable;
+
+        if ($amount <= 0 || $amount > $refundable) {
+            throw ValidationException::withMessages([
+                'amount' => ["Enter an amount between 0.01 and {$refundable}."],
+            ]);
+        }
+
+        $isFull = abs($amount - $refundable) < 0.01;
+
+        $refund = $this->razorpay->refund(
+            (string) $payment->gateway_payment_id,
+            $this->razorpay->toPaise($amount),
+            [
+                'reason' => Str::limit($reason ?? 'Refunded by Listee support', 200, ''),
+                'refundedBy' => (string) $actor->uuid,
+            ],
+        );
+
+        return DB::transaction(function () use ($payment, $amount, $isFull, $refund, $reason): Payment {
+            $payment->forceFill([
+                'refunded_amount' => (float) $payment->refunded_amount + $amount,
+                'refunded_at' => now(),
+                'status' => $isFull ? PaymentStatus::Refunded : $payment->status,
+                'meta' => array_merge($payment->meta ?? [], [
+                    'refunds' => array_merge($payment->meta['refunds'] ?? [], [$refund]),
+                    'refundReason' => $reason,
+                ]),
+            ])->save();
+
+            if ($isFull) {
+                $this->withdrawRefundedOrder($payment->order_id);
+            }
+
+            return $payment->refresh();
+        });
+    }
+
+    /**
+     * Withdraw an order whose payment was refunded in full -- but only while it
+     * is still in play.
+     *
+     * Settled orders (paid or completed) stand: by then the shop has handed the
+     * order over, and coins may already have been earned on it. Pulling those
+     * back is a different decision from giving money back, so a refund there is
+     * goodwill, not a reversal.
+     */
+    private function withdrawRefundedOrder(?int $orderId): void
+    {
+        if ($orderId === null) {
+            return;
+        }
+
+        $order = Order::whereKey($orderId)->lockForUpdate()->first();
+        $inPlay = [OrderStatus::AwaitingPayment, OrderStatus::Placed, OrderStatus::Confirmed];
+
+        if ($order === null || ! in_array($order->status, $inPlay, true)) {
+            return;
+        }
+
+        $order->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
+        $order->loadMissing('customer', 'business');
+
+        if ($order->coins_used > 0 && $order->customer && $order->business) {
+            $this->loyalty->refund(
+                $order->customer,
+                $order->coins_used,
+                $order->business,
+                $order,
+                "Coins returned - order {$order->token} was refunded",
+            );
+        }
+
+        // Unlike a closed payment window, this was done to them -- say so.
+        if ($order->customer) {
+            $this->notifications->notify(
+                $order->customer,
+                NotificationType::OrderUpdate,
+                'Order refunded',
+                "Your order {$order->token} at {$order->business?->name} was cancelled and your payment refunded.",
+                ['link' => '/orders'],
+            );
+        }
+    }
+
+    /**
      * A Razorpay webhook, if it concerns an order payment.
      *
      * Returns 'not_ours' for anything that is not, so the caller can hand the
@@ -357,6 +463,15 @@ class OrderPaymentService
     public function handleWebhook(array $payload): string
     {
         $event = (string) ($payload['event'] ?? '');
+
+        // A refund issued straight from the Razorpay dashboard never passes
+        // through adminRefund(); this is how the order still gets withdrawn.
+        if (in_array($event, ['refund.created', 'refund.processed'], true)) {
+            $refund = $payload['payload']['refund']['entity'] ?? null;
+
+            return is_array($refund) ? $this->webhookRefunded($refund) : 'not_ours';
+        }
+
         $entity = $payload['payload']['payment']['entity'] ?? null;
 
         if (! is_array($entity)) {
@@ -407,6 +522,49 @@ class OrderPaymentService
             $this->capture($payment, $entity);
 
             return 'captured';
+        });
+    }
+
+    /**
+     * Mirror a refund made outside the app -- the Razorpay dashboard -- so the
+     * books and the order both match. Not an order payment ⇒ 'not_ours', and
+     * the plan handler takes it.
+     *
+     * @param  array<string, mixed>  $entity
+     */
+    private function webhookRefunded(array $entity): string
+    {
+        return DB::transaction(function () use ($entity): string {
+            $payment = Payment::where('gateway_payment_id', (string) ($entity['payment_id'] ?? ''))
+                ->whereNotNull('order_id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($payment === null) {
+                return 'not_ours';
+            }
+
+            // Razorpay reports each refund, not a running total; a refund made
+            // through adminRefund() is already on the books.
+            $refunded = $this->razorpay->toRupees((int) ($entity['amount'] ?? 0));
+            if ((float) $payment->refunded_amount >= $refunded) {
+                return 'duplicate';
+            }
+
+            $isFull = $refunded >= (float) $payment->amount;
+
+            $payment->forceFill([
+                'refunded_amount' => $refunded,
+                'refunded_at' => now(),
+                'status' => $isFull ? PaymentStatus::Refunded : $payment->status,
+                'meta' => array_merge($payment->meta ?? [], ['refunds' => [$entity]]),
+            ])->save();
+
+            if ($isFull) {
+                $this->withdrawRefundedOrder($payment->order_id);
+            }
+
+            return 'refunded';
         });
     }
 

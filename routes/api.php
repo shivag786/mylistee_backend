@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryControl
 use App\Http\Controllers\Api\V1\Admin\CategoryRequestController as AdminCategoryRequestController;
 use App\Http\Controllers\Api\V1\Admin\CmsController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController as AdminCustomerController;
+use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Api\V1\Admin\FeatureFlagController;
 use App\Http\Controllers\Api\V1\Admin\OfferController as AdminOfferController;
@@ -370,6 +371,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('plans/{key}', [AdminPlanController::class, 'update'])->name('plans.update');
 
             // Gateway payments + refunds (refund policy enforcement)
+            // Every customer order across shops, with its payment trail.
+            Route::get('orders', [AdminOrderController::class, 'index'])->name('orders.index');
             Route::get('payments', [AdminPaymentController::class, 'index'])->name('payments.index');
             Route::post('payments/{uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
 

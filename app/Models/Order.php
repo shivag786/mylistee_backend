@@ -29,6 +29,10 @@ class Order extends Model
         'status',
         'service_type',
         'payment_method',
+        'payment_choice',
+        'online_amount',
+        'convenience_fee',
+        'online_paid_at',
         'subtotal',
         'coins_used',
         'coin_discount',
@@ -51,6 +55,9 @@ class Order extends Model
             'status' => OrderStatus::class,
             'service_type' => ServiceType::class,
             'payment_method' => PaymentMethod::class,
+            'online_amount' => 'decimal:2',
+            'convenience_fee' => 'decimal:2',
+            'online_paid_at' => 'datetime',
             'subtotal' => 'decimal:2',
             'coin_discount' => 'decimal:2',
             'total' => 'decimal:2',
@@ -61,6 +68,26 @@ class Order extends Model
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
+    }
+
+    /** Whether the online share has landed. */
+    public function isPaidOnline(): bool
+    {
+        return $this->online_paid_at !== null;
+    }
+
+    /**
+     * What the shop still has to collect at the counter.
+     *
+     * The online share comes off only once it has actually been captured -- an
+     * order sitting in AwaitingPayment has taken nothing yet. The convenience
+     * fee is never part of this: it paid for the gateway, not for the food.
+     */
+    public function amountDue(): float
+    {
+        $paid = $this->isPaidOnline() ? (float) $this->online_amount : 0.0;
+
+        return max(0.0, round((float) $this->total - $paid, 2));
     }
 
     protected static function booted(): void

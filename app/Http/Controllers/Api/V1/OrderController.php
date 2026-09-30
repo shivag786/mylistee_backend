@@ -10,6 +10,7 @@ use App\Models\Business;
 use App\Models\Order;
 use App\Models\Review;
 use App\Models\User;
+use App\Services\OrderPaymentService;
 use App\Services\OrderService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -91,6 +92,9 @@ class OrderController extends Controller
             'serviceType' => ['nullable', Rule::in(ServiceType::values())],
             'table' => ['nullable', 'string'],
             'serviceAddress' => ['nullable', 'string', 'max:500'],
+            // Optional: a client that predates online payment sends none, which
+            // means cash. See OrderService::place().
+            'paymentChoice' => ['nullable', Rule::in([OrderPaymentService::CHOICE_ONLINE, OrderPaymentService::CHOICE_COD])],
         ]);
 
         $business = Business::where('slug', $validated['business'])
@@ -109,6 +113,7 @@ class OrderController extends Controller
             isset($validated['serviceType']) ? ServiceType::from($validated['serviceType']) : null,
             $validated['table'] ?? null,
             $validated['serviceAddress'] ?? null,
+            $validated['paymentChoice'] ?? null,
         );
 
         return ApiResponse::success(

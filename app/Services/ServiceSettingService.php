@@ -21,6 +21,9 @@ class ServiceSettingService
                 'modes' => [ServiceType::default()->value],
                 'default_mode' => ServiceType::default()->value,
                 'delivery_fee' => 0,
+                'payment_mode' => BusinessServiceSetting::PAYMENT_FULL,
+                'partial_percent' => 50,
+                'cod_enabled' => true,
             ],
         );
     }
@@ -31,8 +34,15 @@ class ServiceSettingService
      *
      * @param  array<int, string>  $modes
      */
-    public function update(Business $business, array $modes, string $defaultMode, float $deliveryFee): BusinessServiceSetting
-    {
+    public function update(
+        Business $business,
+        array $modes,
+        string $defaultMode,
+        float $deliveryFee,
+        ?string $paymentMode = null,
+        ?int $partialPercent = null,
+        ?bool $codEnabled = null,
+    ): BusinessServiceSetting {
         // Normalise: valid ServiceType values only, unique, pickup guaranteed.
         $valid = array_values(array_unique(array_filter(
             $modes,
@@ -47,10 +57,22 @@ class ServiceSettingService
         }
 
         $setting = $this->for($business);
+
+        // Payment fields are optional so an older client that only knows about
+        // service modes can still save them without resetting payment choices.
+        $payment = array_filter([
+            'payment_mode' => $paymentMode,
+            'partial_percent' => $partialPercent === null
+                ? null
+                : max(BusinessServiceSetting::PARTIAL_MIN, min(BusinessServiceSetting::PARTIAL_MAX, $partialPercent)),
+            'cod_enabled' => $codEnabled,
+        ], fn ($v) => $v !== null);
+
         $setting->update([
             'modes' => $valid,
             'default_mode' => $defaultMode,
             'delivery_fee' => max(0, $deliveryFee),
+            ...$payment,
         ]);
 
         return $setting->fresh();

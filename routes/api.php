@@ -48,6 +48,7 @@ use App\Http\Controllers\Api\V1\FavoriteController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\OrderController;
+use App\Http\Controllers\Api\V1\OrderPaymentController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
 use App\Http\Controllers\Api\V1\WalletTokenController;
@@ -102,6 +103,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             ->name('auth.pin-login');
 
         // Public business-owner sign-up (mobile + PIN).
+        // Customer sign-up with mobile + PIN (only while an admin has it on).
+        Route::post('register-customer', [AuthController::class, 'registerCustomer'])
+            ->middleware('throttle:5,1')
+            ->name('auth.register-customer');
         Route::post('register-owner', [AuthController::class, 'registerOwner'])
             ->middleware('throttle:10,1')
             ->name('auth.register-owner');
@@ -154,6 +159,17 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::get('orders', [OrderController::class, 'index'])->name('orders.index');
         Route::post('orders', [OrderController::class, 'store'])->name('orders.store');
         Route::get('orders/{uuid}', [OrderController::class, 'show'])->name('orders.show');
+
+        // Paying for an order online. Opening Checkout is throttled harder than
+        // the rest: each call creates a real order at Razorpay.
+        Route::post('orders/{uuid}/payment', [OrderPaymentController::class, 'create'])
+            ->middleware('throttle:10,1')
+            ->name('orders.payment.create');
+        Route::post('orders/{uuid}/payment/verify', [OrderPaymentController::class, 'verify'])
+            ->middleware('throttle:20,1')
+            ->name('orders.payment.verify');
+        Route::post('orders/{uuid}/payment/release', [OrderPaymentController::class, 'release'])
+            ->name('orders.payment.release');
 
         // Favorites + reviews (document/phase/11 §Favorites / Reviews)
         Route::get('favorites', [FavoriteController::class, 'index'])->name('favorites.index');
@@ -337,6 +353,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('customers', [AdminCustomerController::class, 'index'])->name('customers.index');
             Route::get('customers/{uuid}', [AdminCustomerController::class, 'show'])->name('customers.show');
             Route::patch('customers/{uuid}/status', [AdminCustomerController::class, 'updateStatus'])->name('customers.status');
+            Route::post('customers/{uuid}/reset-pin', [AdminCustomerController::class, 'resetPin'])
+                ->middleware('throttle:10,1')
+                ->name('customers.reset-pin');
 
             // Offer oversight + review moderation
             Route::get('offers', [AdminOfferController::class, 'index'])->name('offers.index');

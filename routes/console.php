@@ -14,3 +14,8 @@ Schedule::command('app:maintenance')->dailyAt('03:00')->withoutOverlapping();
 
 // Promotion engine auto start/stop (Phase 7.2b, 07A event-driven automation).
 Schedule::command('promotions:tick')->everyMinute()->withoutOverlapping();
+
+// Online orders whose payment never arrived (tab closed, phone died) are
+// withdrawn and their coins returned. Safe even if the money lands later -- a
+// late capture reinstates the order.
+Schedule::command('orders:release-unpaid')->everyFiveMinutes()->withoutOverlapping();

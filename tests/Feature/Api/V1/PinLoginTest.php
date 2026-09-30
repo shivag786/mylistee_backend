@@ -93,7 +93,7 @@ class PinLoginTest extends TestCase
         $this->postJson('/api/v1/auth/register-owner', [
             'name' => 'Priya Shah',
             'mobile' => '9123456780',
-            'pin' => '4321',
+            'pin' => '4816',
         ])
             ->assertStatus(201)
             ->assertJsonPath('data.user.role', 'business_owner')
@@ -102,11 +102,11 @@ class PinLoginTest extends TestCase
         $this->assertDatabaseHas('users', [
             'phone' => '9123456780',
             'role' => 'business_owner',
-            'pin_plain' => '4321',
+            'pin_plain' => '4816',
         ]);
 
         // The new owner can immediately sign in with those credentials.
-        $this->postJson('/api/v1/auth/pin-login', ['identifier' => '9123456780', 'pin' => '4321'])
+        $this->postJson('/api/v1/auth/pin-login', ['identifier' => '9123456780', 'pin' => '4816'])
             ->assertOk();
     }
 
@@ -117,7 +117,7 @@ class PinLoginTest extends TestCase
         $this->postJson('/api/v1/auth/register-owner', [
             'name' => 'Someone',
             'mobile' => '9123456780',
-            'pin' => '1111',
+            'pin' => '5829',
         ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['mobile']);

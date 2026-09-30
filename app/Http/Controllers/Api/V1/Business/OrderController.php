@@ -31,6 +31,11 @@ class OrderController extends Controller
         $business = $this->business($request);
 
         $query = $business->orders()
+            // Never an order still waiting on its online payment -- not through
+            // any filter. `?since=` and `?status=` skip the active() default
+            // below, and an unpaid order must not reach the shop by either road:
+            // it is not an order yet, and the customer may never pay for it.
+            ->where('status', '!=', OrderStatus::AwaitingPayment->value)
             ->with(['items', 'customer:id,name', 'diningTable:id,label'])
             ->when($request->string('status')->trim()->value(), fn ($q, $s) => $q->where('status', $s))
             ->when(
@@ -50,7 +55,9 @@ class OrderController extends Controller
     /** PATCH /business/orders/{uuid}/status */
     public function status(Request $request, string $uuid): JsonResponse
     {
-        $order = $this->business($request)->orders()->with(['items', 'diningTable:id,label'])->where('uuid', $uuid)->first();
+        $order = $this->business($request)->orders()
+            ->where('status', '!=', OrderStatus::AwaitingPayment->value)
+            ->with(['items', 'diningTable:id,label'])->where('uuid', $uuid)->first();
         if ($order === null) {
             return ApiResponse::error('Order not found.', status: 404);
         }

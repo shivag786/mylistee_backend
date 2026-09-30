@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Business;
+use App\Services\OrderPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
@@ -73,6 +74,10 @@ class PublicBusinessResource extends JsonResource
                 ? $this->serviceSetting->default_mode
                 : $modes[0],
             'deliveryFee' => $this->deliveryFee(),
+            // Effective payment options -- the shop's choice with the gateway's
+            // availability already applied, so checkout never has to re-derive
+            // the rule and can never offer something the server would refuse.
+            'payment' => app(OrderPaymentService::class)->optionsFor($this->resource),
         ];
     }
 

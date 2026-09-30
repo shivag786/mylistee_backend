@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Services\OrderPaymentService;
 use App\Services\RazorpayService;
 use App\Services\SubscriptionPaymentService;
 use App\Support\ApiResponse;
@@ -32,6 +33,7 @@ class RazorpayWebhookController extends Controller
     public function __construct(
         private readonly RazorpayService $razorpay,
         private readonly SubscriptionPaymentService $payments,
+        private readonly OrderPaymentService $orderPayments,
     ) {}
 
     /** POST /webhooks/razorpay */
@@ -50,7 +52,16 @@ class RazorpayWebhookController extends Controller
         }
 
         try {
-            $result = $this->payments->handleWebhook((array) $request->json()->all());
+            $payload = (array) $request->json()->all();
+
+            // One Razorpay account, one webhook, two kinds of payment. A customer
+            // order's payment must never reach the subscription handler: its
+            // capture activates a plan, and an order has no plan -- it would log a
+            // critical error and leave the order unreleased.
+            $result = $this->orderPayments->handleWebhook($payload);
+            if ($result === 'not_ours') {
+                $result = $this->payments->handleWebhook($payload);
+            }
         } catch (Throwable $e) {
             // A 5xx makes Razorpay retry, which is what we want for a transient
             // failure — but the error must be visible, not swallowed into a retry

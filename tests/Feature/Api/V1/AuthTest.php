@@ -219,13 +219,13 @@ class AuthTest extends TestCase
 
         $response = $this->actingAs($user)->postJson('/api/v1/auth/change-pin', [
             'currentPin' => '1234',
-            'newPin' => '5678',
+            'newPin' => '5829',
         ]);
 
         $response->assertOk()->assertJsonPath('success', true);
 
         $user->refresh();
-        $this->assertTrue(Hash::check('5678', $user->pin));
+        $this->assertTrue(Hash::check('5829', $user->pin));
         $this->assertFalse(Hash::check('1234', $user->pin));
     }
 
@@ -239,7 +239,7 @@ class AuthTest extends TestCase
         $token = $user->createToken('api')->plainTextToken;
 
         $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/auth/change-pin', ['currentPin' => '1234', 'newPin' => '5678'])
+            ->postJson('/api/v1/auth/change-pin', ['currentPin' => '1234', 'newPin' => '5829'])
             ->assertOk();
 
         // The same token must still work — the owner is not signed out.
@@ -258,7 +258,7 @@ class AuthTest extends TestCase
 
         $this->actingAs($user)->postJson('/api/v1/auth/change-pin', [
             'currentPin' => '9999',
-            'newPin' => '5678',
+            'newPin' => '5829',
         ])->assertStatus(422)->assertJsonValidationErrors('currentPin');
 
         $user->refresh();
@@ -283,7 +283,7 @@ class AuthTest extends TestCase
     {
         $this->postJson('/api/v1/auth/change-pin', [
             'currentPin' => '1234',
-            'newPin' => '5678',
+            'newPin' => '5829',
         ])->assertStatus(401);
     }
 }

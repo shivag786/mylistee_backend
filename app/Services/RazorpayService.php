@@ -25,16 +25,50 @@ class RazorpayService
     /** Razorpay rejects a receipt longer than this. */
     private const RECEIPT_MAX = 40;
 
+    public function __construct(private readonly SettingService $settings) {}
+
     /** Is the gateway usable? Both keys must be present. */
     public function isConfigured(): bool
     {
-        return filled(config('razorpay.key_id')) && filled(config('razorpay.key_secret'));
+        return filled($this->keyId()) && filled($this->keySecret());
     }
 
     /** The publishable key the browser needs to open Checkout. Never the secret. */
     public function publicKey(): ?string
     {
-        return config('razorpay.key_id');
+        return $this->keyId() ?: null;
+    }
+
+    /**
+     * Convenience fee on an online payment, as a percentage. Admin-set; added to
+     * the customer's bill, never taken out of the shop's price.
+     */
+    public function feePercent(): float
+    {
+        return max(0.0, (float) $this->settings->get('razorpayFeePercent', 2.0));
+    }
+
+    /*
+     * Keys come from the admin panel first and the server's .env second, key by
+     * key. The admin panel is what lets the gateway be connected or its keys
+     * rotated without a deploy; .env keeps every existing install working until
+     * someone fills the panel in. Each key falls back on its own, so saving only
+     * a new webhook secret cannot orphan the API keys that were in .env.
+     */
+
+    private function keyId(): string
+    {
+        return (string) ($this->settings->get('razorpayKeyId') ?: config('razorpay.key_id'));
+    }
+
+    private function keySecret(): string
+    {
+        return (string) ($this->settings->get('razorpayKeySecret') ?: config('razorpay.key_secret'));
+    }
+
+    private function webhookSecret(): string
+    {
+        return (string) ($this->settings->get('razorpayWebhookSecret') ?: config('razorpay.webhook_secret'));
     }
 
     /** Rupees → paise, rounded once so float drift can never reach the gateway. */
@@ -108,7 +142,7 @@ class RazorpayService
      */
     public function verifyPaymentSignature(string $orderId, string $paymentId, string $signature): bool
     {
-        return $this->signatureMatches("{$orderId}|{$paymentId}", $signature, (string) config('razorpay.key_secret'));
+        return $this->signatureMatches("{$orderId}|{$paymentId}", $signature, $this->keySecret());
     }
 
     /**
@@ -120,11 +154,11 @@ class RazorpayService
      */
     public function verifyWebhookSignature(string $rawBody, string $signature): bool
     {
-        $secret = (string) config('razorpay.webhook_secret');
+        $secret = $this->webhookSecret();
 
         if ($secret === '') {
             // Fail closed: an unverifiable webhook is an untrusted webhook.
-            Log::warning('Razorpay webhook rejected: RAZORPAY_WEBHOOK_SECRET is not set.');
+            Log::warning('Razorpay webhook rejected: no webhook secret is set (admin panel or RAZORPAY_WEBHOOK_SECRET).');
 
             return false;
         }
@@ -150,7 +184,7 @@ class RazorpayService
     private function request(string $method, string $path, array $payload = []): array
     {
         if (! $this->isConfigured()) {
-            throw new RuntimeException('Razorpay is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.');
+            throw new RuntimeException('Razorpay is not configured. Add the keys in Admin > Settings, or set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.');
         }
 
         $url = rtrim((string) config('razorpay.base_url'), '/')."/{$path}";
@@ -178,10 +212,7 @@ class RazorpayService
 
     private function client(): PendingRequest
     {
-        return Http::withBasicAuth(
-            (string) config('razorpay.key_id'),
-            (string) config('razorpay.key_secret'),
-        )
+        return Http::withBasicAuth($this->keyId(), $this->keySecret())
             ->acceptJson()
             ->asJson()
             ->timeout((int) config('razorpay.timeout', 30))

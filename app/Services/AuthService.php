@@ -57,11 +57,23 @@ class AuthService
      * @throws ValidationException on bad credentials
      * @throws \Symfony\Component\HttpKernel\Exception\HttpException when suspended
      */
-    public function loginWithPin(string $identifier, string $pin): array
+    public function loginWithPin(string $identifier, string $pin, ?string $ip = null): array
     {
         // Per-account lockout: 5 failed attempts locks that identifier for 15
         // minutes (brute-force protection — flagged in SECURITY_AUDIT.md).
         $key = 'pin-login:'.mb_strtolower(trim($identifier));
+
+        // Per-address cap on failures. The per-account lockout above never trips
+        // for one guess tried against many numbers, which is how common PINs are
+        // sprayed. Generous on purpose: mobile carriers put thousands of people
+        // behind one address, and no real person fails fifty times in a row.
+        $ipKey = $ip !== null ? 'pin-login-ip:'.$ip : null;
+
+        if ($ipKey !== null && RateLimiter::tooManyAttempts($ipKey, self::PIN_IP_MAX_FAILURES)) {
+            throw ValidationException::withMessages([
+                'pin' => [$this->lockoutMessage(RateLimiter::availableIn($ipKey))],
+            ]);
+        }
 
         if (RateLimiter::tooManyAttempts($key, self::PIN_MAX_ATTEMPTS)) {
             throw ValidationException::withMessages([
@@ -75,6 +87,9 @@ class AuthService
 
         if ($user === null || $user->pin === null || ! Hash::check($pin, $user->pin)) {
             RateLimiter::hit($key, self::PIN_DECAY_SECONDS);
+            if ($ipKey !== null) {
+                RateLimiter::hit($ipKey, self::PIN_DECAY_SECONDS);
+            }
 
             throw ValidationException::withMessages([
                 'pin' => ['Invalid mobile number or PIN.'],
@@ -125,13 +140,19 @@ class AuthService
 
         $user->forceFill([
             'pin' => $newPin,
-            'pin_plain' => $newPin,
+            // Only an owner's PIN is kept readable, so an admin can read it back
+            // to them. A customer's never is -- changing it must not start doing
+            // what signing up deliberately does not.
+            'pin_plain' => $user->role === UserRole::BusinessOwner ? $newPin : null,
         ])->save();
     }
 
     private const PIN_MAX_ATTEMPTS = 5;
 
     private const PIN_DECAY_SECONDS = 900;
+
+    /** Failed PIN sign-ins one address may make within PIN_DECAY_SECONDS. */
+    private const PIN_IP_MAX_FAILURES = 50;
 
     private function lockoutMessage(int $seconds): string
     {
@@ -149,6 +170,30 @@ class AuthService
      *
      * @return array{user: User, token: string}
      */
+    /**
+     * Customer sign-up with mobile + PIN, for when an admin has turned mobile
+     * login on. There is no OTP: the PIN is what stops someone who merely knows
+     * a number from walking into that account, its wallet and its orders.
+     *
+     * Unlike registerOwner, the PIN is not kept in plain text -- an admin has
+     * no reason to read a customer's PIN back.
+     *
+     * @return array{user: User, token: string}
+     */
+    public function registerCustomer(string $name, string $phone, string $pin): array
+    {
+        $user = User::create([
+            'name' => $name,
+            'phone' => $phone,
+            'pin' => $pin,
+            'role' => UserRole::Customer,
+            'status' => UserStatus::Active,
+            'provider' => 'pin',
+        ]);
+
+        return $this->issueSession($user);
+    }
+
     public function registerOwner(string $name, string $phone, string $pin): array
     {
         $user = User::create([

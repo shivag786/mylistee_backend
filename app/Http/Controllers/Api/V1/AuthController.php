@@ -6,7 +6,9 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\GoogleLoginRequest;
 use App\Http\Resources\UserResource;
+use App\Rules\StrongPin;
 use App\Services\AuthService;
+use App\Services\SettingService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +17,10 @@ use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $auth) {}
+    public function __construct(
+        private readonly AuthService $auth,
+        private readonly SettingService $settings,
+    ) {}
 
     /**
      * Exchange a Google/Firebase ID token for a Sanctum session.
@@ -42,7 +47,7 @@ class AuthController extends Controller
             'pin' => ['required', 'string', 'max:32'],
         ]);
 
-        $session = $this->auth->loginWithPin($validated['identifier'], $validated['pin']);
+        $session = $this->auth->loginWithPin($validated['identifier'], $validated['pin'], $request->ip());
 
         return ApiResponse::success(
             data: $this->sessionPayload($session),
@@ -59,7 +64,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'mobile' => ['required', 'string', 'digits:10', 'unique:users,phone'],
-            'pin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/'],
+            'pin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/', new StrongPin()],
         ], [
             'mobile.digits' => 'Enter a valid 10-digit mobile number.',
             'mobile.unique' => 'An account with this mobile number already exists. Please sign in.',
@@ -67,6 +72,43 @@ class AuthController extends Controller
         ]);
 
         $session = $this->auth->registerOwner(
+            name: $validated['name'],
+            phone: $validated['mobile'],
+            pin: $validated['pin'],
+        );
+
+        return ApiResponse::success(
+            data: $this->sessionPayload($session),
+            message: 'Account created.',
+            status: 201,
+        );
+    }
+
+    /**
+     * Customer sign-up with mobile + PIN.
+     * POST /api/v1/auth/register-customer (public, throttled).
+     *
+     * Refused while an admin has mobile login switched off. Hiding the form is
+     * not enough on its own -- anyone can still call the API -- so the server
+     * enforces it too.
+     */
+    public function registerCustomer(Request $request): JsonResponse
+    {
+        if (! (bool) $this->settings->get('loginMobile', false)) {
+            return ApiResponse::error('Sign-up with a mobile number is not available right now.', status: 403);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'mobile' => ['required', 'string', 'digits:10', 'unique:users,phone'],
+            'pin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/', new StrongPin()],
+        ], [
+            'mobile.digits' => 'Enter a valid 10-digit mobile number.',
+            'mobile.unique' => 'An account with this mobile number already exists. Please sign in.',
+            'pin.regex' => 'Your PIN must be digits only.',
+        ]);
+
+        $session = $this->auth->registerCustomer(
             name: $validated['name'],
             phone: $validated['mobile'],
             pin: $validated['pin'],
@@ -103,7 +145,7 @@ class AuthController extends Controller
     {
         $validated = $request->validate([
             'currentPin' => ['required', 'string', 'max:32'],
-            'newPin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/'],
+            'newPin' => ['required', 'string', 'min:4', 'max:8', 'regex:/^[0-9]+$/', new StrongPin()],
         ], [
             'newPin.regex' => 'Your PIN must be digits only.',
         ]);

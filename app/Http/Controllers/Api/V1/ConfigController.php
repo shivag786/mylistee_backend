@@ -46,7 +46,17 @@ class ConfigController extends Controller
             // is exposed here; the publishable key comes back from the checkout
             // call itself. The owner UI uses this to decide between the paid
             // checkout flow and the pre-gateway simulated upgrade (local/demo).
-            'payments' => ['razorpay' => $this->razorpay->isConfigured()],
+            'payments' => [
+                'razorpay' => $this->razorpay->isConfigured(),
+                // Convenience fee on the online share of an order, in percent.
+                'convenienceFeePercent' => $this->razorpay->isConfigured() ? $this->razorpay->feePercent() : 0,
+            ],
+            // Which ways in the customer login page offers. SettingService keeps
+            // at least one on, so the page is never left with nothing.
+            'auth' => [
+                'google' => (bool) $this->settings->get('loginGoogle', true),
+                'mobile' => (bool) $this->settings->get('loginMobile', false),
+            ],
         ], 'App config.');
     }
 }

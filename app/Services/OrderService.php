@@ -20,14 +20,18 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Order lifecycle (Phase 7.5). A customer confirms a one-shop cart into an
- * order; the owner confirms, marks it paid (manual — no gateway), and completes
- * it. Wallet coins may be spent at checkout and are earned back on payment.
+ * order; the owner confirms, marks it paid, and completes it. Wallet coins may
+ * be spent at checkout and are earned back on payment.
+ *
+ * An order paid online is placed in AwaitingPayment and handed to
+ * OrderPaymentService; it reaches the shop only once the money lands.
  */
 class OrderService
 {
     public function __construct(
         private readonly NotificationService $notifications,
         private readonly LoyaltyService $loyalty,
+        private readonly OrderPaymentService $payments,
     ) {}
 
     /**
@@ -50,6 +54,7 @@ class OrderService
         ?ServiceType $serviceType = null,
         ?string $tableUuid = null,
         ?string $serviceAddress = null,
+        ?string $paymentChoice = null,
     ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Your cart is empty.']]);
@@ -58,7 +63,12 @@ class OrderService
         [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
         $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
 
-        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee): Order {
+        // No choice sent means a client from before online payment existed: cash,
+        // exactly as every order was until now. split() refuses it with a clear
+        // message if this shop no longer takes cash.
+        $paymentChoice ??= OrderPaymentService::CHOICE_COD;
+
+        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee, $paymentChoice): Order {
             $lines = [];
             $subtotal = 0.0;
             $coinsEarned = 0;
@@ -115,17 +125,26 @@ class OrderService
             $coinsUsed = max(0, min($coinsToUse, $maxCoins));
             $coinDiscount = round($coinsUsed * $coinValue, 2);
 
+            $total = round($subtotal - $coinDiscount + $deliveryFee, 2);
+            ['online' => $online, 'fee' => $fee] = $this->payments->split($business, $total, $paymentChoice);
+
+            // Anything to collect online holds the order back until it lands.
+            $awaitingPayment = $online > 0;
+
             $order = Order::create([
                 'token' => $this->uniqueToken($business),
                 'business_id' => $business->id,
                 'customer_id' => $customer->id,
                 'table_id' => $table?->id,
-                'status' => OrderStatus::Placed,
+                'status' => $awaitingPayment ? OrderStatus::AwaitingPayment : OrderStatus::Placed,
+                'payment_choice' => $paymentChoice,
+                'online_amount' => $online,
+                'convenience_fee' => $fee,
                 'service_type' => $serviceType,
                 'subtotal' => $subtotal,
                 'coins_used' => $coinsUsed,
                 'coin_discount' => $coinDiscount,
-                'total' => round($subtotal - $coinDiscount + $deliveryFee, 2),
+                'total' => $total,
                 'delivery_fee' => $deliveryFee,
                 'coins_earned' => $coinsEarned,
                 'note' => $note,
@@ -141,7 +160,9 @@ class OrderService
                 $this->loyalty->spend($customer, $coinsUsed, $business, $order, "Paid with coins on order {$order->token}");
             }
 
-            if ($business->owner) {
+            // An order waiting on its online payment is not an order for the shop
+            // yet -- OrderPaymentService notifies them when the money lands.
+            if ($business->owner && ! $awaitingPayment) {
                 $this->notifications->notify(
                     $business->owner,
                     NotificationType::OrderPlaced,
@@ -232,8 +253,11 @@ class OrderService
             'status' => OrderStatus::Paid,
             'paid_at' => Carbon::now(),
             'paid_by' => $actor->id,
-            // Default to cash when the owner didn't specify — the common counter case.
-            'payment_method' => $paymentMethod ?? PaymentMethod::Cod,
+            // Default to cash when the owner didn't specify -- the common counter
+            // case. An order already paid online in full had nothing collected at
+            // the counter, so it defaults to online instead.
+            'payment_method' => $paymentMethod
+                ?? ($order->isPaidOnline() && $order->amountDue() <= 0 ? PaymentMethod::Online : PaymentMethod::Cod),
         ]);
 
         // Credit the coins the combos promised.
@@ -262,6 +286,12 @@ class OrderService
 
     private function markCancelled(Order $order): void
     {
+        // Refund first: if the gateway refuses, the cancel is refused with it,
+        // rather than the order going away with the customer's money still held.
+        if ($order->isPaidOnline()) {
+            $this->payments->refundFor($order);
+        }
+
         $order->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
 
         // Return any coins spent on the order.
@@ -310,8 +340,13 @@ class OrderService
     {
         do {
             $token = str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
+            // AwaitingPayment counts too: it holds its token, and once paid it
+            // becomes Placed alongside whatever took the same number meanwhile.
             $exists = $business->orders()
-                ->whereIn('status', array_map(fn ($s) => $s->value, OrderStatus::active()))
+                ->whereIn('status', array_map(
+                    fn ($s) => $s->value,
+                    [...OrderStatus::active(), OrderStatus::AwaitingPayment],
+                ))
                 ->where('token', $token)
                 ->exists();
         } while ($exists);

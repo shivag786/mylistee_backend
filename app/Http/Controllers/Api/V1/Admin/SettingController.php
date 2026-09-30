@@ -24,7 +24,9 @@ class SettingController extends Controller
     /** GET /admin/settings */
     public function index(): JsonResponse
     {
-        return ApiResponse::success($this->settings->all(), 'Settings retrieved.');
+        // masked(), never all(): the Razorpay secrets must not reach a browser,
+        // where they would sit in devtools, HAR files and any logging proxy.
+        return ApiResponse::success($this->settings->masked(), 'Settings retrieved.');
     }
 
     /** PUT /admin/settings */
@@ -39,12 +41,28 @@ class SettingController extends Controller
             'defaultLanguage' => ['sometimes', 'string', 'max:8'],
             'maintenanceMode' => ['sometimes', 'boolean'],
             'maintenanceMessage' => ['sometimes', 'nullable', 'string', 'max:255'],
+
+            // Razorpay. Secrets may be sent blank, which keeps the stored value.
+            'razorpayKeyId' => ['sometimes', 'nullable', 'string', 'max:64', 'regex:/^rzp_(test|live)_[A-Za-z0-9]+$/'],
+            'razorpayKeySecret' => ['sometimes', 'nullable', 'string', 'max:128'],
+            'razorpayWebhookSecret' => ['sometimes', 'nullable', 'string', 'max:128'],
+            // Capped well below anything a real gateway charges, so a typo such
+            // as 25 instead of 2.5 cannot quietly quadruple every online bill.
+            'razorpayFeePercent' => ['sometimes', 'numeric', 'min:0', 'max:10'],
+
+            'loginGoogle' => ['sometimes', 'boolean'],
+            'loginMobile' => ['sometimes', 'boolean'],
+        ], [
+            'razorpayKeyId.regex' => 'That does not look like a Razorpay key id (it starts with rzp_test_ or rzp_live_).',
         ]);
 
-        $all = $this->settings->set($validated);
+        $this->settings->set($validated);
+
+        // The audit trail records which settings changed, never their values --
+        // that would put the secrets in a table admins can browse.
         $this->audit->log($request->user(), 'settings.update', null, 'Updated platform settings', array_keys($validated));
 
-        return ApiResponse::success($all, 'Settings updated.');
+        return ApiResponse::success($this->settings->masked(), 'Settings updated.');
     }
 
     /**
@@ -65,24 +83,24 @@ class SettingController extends Controller
         $this->storage->delete($this->settings->get('orderSoundPath'));
 
         $path = $this->storage->store($request->file('sound'), 'sounds');
-        $all = $this->settings->set([
+        $this->settings->set([
             'orderSoundPath' => $path,
             'orderSoundUrl' => $this->storage->url($path),
         ]);
 
         $this->audit->log($request->user(), 'settings.order_sound.upload', null, 'Uploaded order alert sound');
 
-        return ApiResponse::success($all, 'Order sound updated.');
+        return ApiResponse::success($this->settings->masked(), 'Order sound updated.');
     }
 
     /** DELETE /admin/settings/order-sound — revert owners to the built-in ding. */
     public function deleteOrderSound(Request $request): JsonResponse
     {
         $this->storage->delete($this->settings->get('orderSoundPath'));
-        $all = $this->settings->set(['orderSoundPath' => null, 'orderSoundUrl' => null]);
+        $this->settings->set(['orderSoundPath' => null, 'orderSoundUrl' => null]);
 
         $this->audit->log($request->user(), 'settings.order_sound.delete', null, 'Removed order alert sound');
 
-        return ApiResponse::success($all, 'Order sound removed.');
+        return ApiResponse::success($this->settings->masked(), 'Order sound removed.');
     }
 }

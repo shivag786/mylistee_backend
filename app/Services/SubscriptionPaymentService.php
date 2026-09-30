@@ -398,7 +398,13 @@ class SubscriptionPaymentService
         }
 
         return DB::transaction(function () use ($orderId, $entity): string {
-            $payment = Payment::where('gateway_order_id', $orderId)->lockForUpdate()->first();
+            // Plan payments only. The controller routes order payments elsewhere,
+            // but capture() here activates a plan -- if one ever slipped through
+            // it would do real damage, so this does not rely on the routing.
+            $payment = Payment::where('gateway_order_id', $orderId)
+                ->whereNull('order_id')
+                ->lockForUpdate()
+                ->first();
 
             if ($payment === null) {
                 Log::warning('Razorpay webhook for an unknown order', ['orderId' => $orderId]);
@@ -429,7 +435,9 @@ class SubscriptionPaymentService
     /** @param  array<string, mixed>  $entity */
     private function webhookFailed(array $entity): string
     {
-        $payment = Payment::where('gateway_order_id', (string) ($entity['order_id'] ?? ''))->first();
+        $payment = Payment::where('gateway_order_id', (string) ($entity['order_id'] ?? ''))
+            ->whereNull('order_id')
+            ->first();
 
         if ($payment === null || $payment->status === PaymentStatus::Captured) {
             return 'ignored';

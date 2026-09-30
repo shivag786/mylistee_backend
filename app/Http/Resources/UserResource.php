@@ -27,6 +27,9 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'role' => $this->role->value,
             'status' => $this->status->value,
+            // Whether mobile + PIN sign-in works for this account. A Google-only
+            // customer has none, so "change PIN" means nothing to them.
+            'hasPin' => $this->pin !== null,
         ];
     }
 }

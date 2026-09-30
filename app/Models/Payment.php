@@ -24,6 +24,7 @@ class Payment extends Model
         'plan_id',
         'invoice_id',
         'subscription_id',
+        'order_id',
         'created_by',
         'gateway',
         'gateway_order_id',
@@ -77,6 +78,18 @@ class Payment extends Model
     public function plan(): BelongsTo
     {
         return $this->belongsTo(Plan::class);
+    }
+
+    /** The customer order this paid for; null for a plan purchase. @return BelongsTo<Order, $this> */
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class);
+    }
+
+    /** True when this paid for a customer order rather than a business plan. */
+    public function isForOrder(): bool
+    {
+        return $this->order_id !== null;
     }
 
     /** @return BelongsTo<Invoice, $this> */

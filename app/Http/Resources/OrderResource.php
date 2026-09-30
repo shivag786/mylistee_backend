@@ -42,6 +42,15 @@ class OrderResource extends JsonResource
             'coinDiscount' => (float) $this->coin_discount,
             'deliveryFee' => (float) $this->delivery_fee,
             'total' => (float) $this->total,
+            // How the bill splits. `paymentChoice` is null on orders from before
+            // online payment existed, which were all cash at the counter.
+            'paymentChoice' => $this->payment_choice,
+            'onlineAmount' => (float) $this->online_amount,
+            'convenienceFee' => (float) $this->convenience_fee,
+            'paidOnline' => $this->isPaidOnline(),
+            // What the shop still collects in person. The convenience fee is never
+            // in it: that paid for the gateway, not the order.
+            'amountDue' => $this->amountDue(),
             'coinsEarned' => (int) $this->coins_earned,
             'note' => $this->note,
             'items' => OrderItemResource::collection($this->whenLoaded('items')),

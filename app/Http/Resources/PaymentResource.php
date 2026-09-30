@@ -36,6 +36,11 @@ class PaymentResource extends JsonResource
             'failedAt' => $this->failed_at?->toIso8601String(),
             'refundedAt' => $this->refunded_at?->toIso8601String(),
             'createdAt' => $this->created_at?->toIso8601String(),
+            // What the money was for: a business plan, or a customer's order.
+            'kind' => $this->order_id !== null ? 'order' : 'plan',
+            'orderToken' => $this->whenLoaded('order', fn () => $this->order?->token),
+            'orderUuid' => $this->whenLoaded('order', fn () => $this->order?->uuid),
+            'customerName' => $this->whenLoaded('order', fn () => $this->order?->customer?->name),
             'planName' => $this->whenLoaded('plan', fn () => $this->plan->name),
             'businessName' => $this->whenLoaded('business', fn () => $this->business->name),
             'invoiceNumber' => $this->whenLoaded('invoice', fn () => $this->invoice?->number),

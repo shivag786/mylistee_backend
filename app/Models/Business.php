@@ -350,7 +350,8 @@ class Business extends Model
             return false;
         }
 
-        $now = now()->format('H:i:s');
+        // Shop hours are local wall-clock times; the app clock runs in UTC.
+        $now = now(config('app.business_timezone'))->format('H:i:s');
         $open = $this->normaliseTime((string) $this->opening_time);
         $close = $this->normaliseTime((string) $this->closing_time);
 
@@ -358,10 +359,11 @@ class Business extends Model
             return true; // open 24 hours
         }
 
-        // Overnight windows (e.g. 18:00–02:00) wrap past midnight.
+        // Overnight windows (e.g. 18:00–02:00) wrap past midnight. The closing
+        // minute itself counts as closed.
         return $close > $open
-            ? ($now >= $open && $now <= $close)
-            : ($now >= $open || $now <= $close);
+            ? ($now >= $open && $now < $close)
+            : ($now >= $open || $now < $close);
     }
 
     /** Coerce a time value to "H:i:s" for safe string comparison. */

@@ -80,6 +80,13 @@ return [
     'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
+    | Wall-clock zone that shop opening/closing times are entered in. Kept apart
+    | from `timezone` so stored timestamps stay UTC while "Open now" is judged
+    | against the shop's local time.
+    */
+    'business_timezone' => env('BUSINESS_TIMEZONE', 'Asia/Kolkata'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------

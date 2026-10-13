@@ -130,6 +130,12 @@ class Business extends Model
         return $this->hasMany(Favorite::class);
     }
 
+    /** The shop's own customer book (mobile-number based). @return HasMany<ShopCustomer, $this> */
+    public function shopCustomers(): HasMany
+    {
+        return $this->hasMany(ShopCustomer::class);
+    }
+
     /** @return HasMany<Offer, $this> */
     public function offers(): HasMany
     {

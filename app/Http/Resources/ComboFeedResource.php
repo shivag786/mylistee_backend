@@ -32,6 +32,9 @@ class ComboFeedResource extends JsonResource
                 'slug' => $this->business->slug,
                 'name' => $this->business->name,
                 'logo' => $this->business->logo_path ? Storage::disk('public')->url($this->business->logo_path) : null,
+                // Set by FeedRanker: null without the viewer's location.
+                'distanceMeters' => $this->getAttribute('feed_distance_meters'),
+                'isFollowed' => (bool) $this->getAttribute('feed_is_followed'),
             ],
         ];
     }

@@ -42,6 +42,88 @@ class SettingService
         // stays on -- see set().
         'loginGoogle' => true,
         'loginMobile' => false,
+
+        // App theme, applied on every device through GET /config. Defaults are
+        // the stock palette in the frontend's tokens.css; hover and soft shades
+        // are derived from these on the client.
+        'themePrimary' => '#e23744',
+        'themeSecondary' => '#2d3436',
+        'themeAccent' => '#fbbf24',
+        'themeSuccess' => '#22c55e',
+        'themeInfo' => '#3b82f6',
+        'themeWarning' => '#f59e0b',
+        'themeDanger' => '#ef4444',
+        'themeBackground' => '#f8f9fa',
+        'themeSurface' => '#ffffff',
+        'themeText' => '#212121',
+        'themeFont' => 'Poppins',
+        'themeHeadingFont' => 'Poppins',
+
+        // Optional colours: '' = follow the main palette (see THEME_EXTRA_COLORS).
+        'themeHeader' => '',
+        'themeNav' => '',
+        'themeNavActive' => '',
+        'themeGradientFrom' => '',
+        'themeGradientTo' => '',
+        'themeStar' => '',
+        'themeOffer' => '',
+
+        // light | dark | system (follow the phone), with dark mode's own colours.
+        'themeMode' => 'light',
+        'themeDarkBackground' => '#1e1e1e',
+        'themeDarkSurface' => '#262626',
+        'themeDarkText' => '#f3f4f6',
+
+        'themeRadius' => 'rounded',   // sharp | rounded | pill
+        'themeTextSize' => 'normal',  // small | normal | large
+
+        // App icon (favicon, home-screen and PWA icons): drawn from the theme
+        // colours ('auto') or made from an uploaded image ('upload'). Only one
+        // is active. The version changes on every regeneration, so browsers
+        // fetch the new icons instead of serving cached ones.
+        'appIconMode' => 'auto',
+        'appIconUploadPath' => null,
+        'appIconVersion' => null,
+
+        // Tint shop-page menu cards with each dish's own colours (glow under the
+        // photo, faint wash across the card). The full-screen dish viewer keeps
+        // its colours either way.
+        'menuCardColors' => true,
+
+        // Customer home page sections in the admin's order — a list of
+        // {id, enabled, title, slot}. Null = the built-in order (see frontend
+        // homeSections.ts). Sections missing from a saved list still show, at
+        // their default place, so a new section never silently disappears.
+        'homeLayout' => null,
+    ];
+
+    /** Home page section ids the layout may list. Mirrors the frontend registry. */
+    public const HOME_SECTIONS = [
+        'hero', 'stories', 'banners_top', 'search', 'rewards', 'categories', 'deals', 'reels',
+        'combos', 'banners_after_combos', 'festival', 'recommended', 'new', 'nearby',
+    ];
+
+    /** When a section shows: always, or only in one part of the day. */
+    public const HOME_SLOTS = ['all', 'morning', 'afternoon', 'evening', 'night'];
+
+    /** Colour settings, all "#rrggbb". */
+    public const THEME_COLORS = [
+        'themePrimary', 'themeSecondary', 'themeAccent', 'themeSuccess', 'themeInfo',
+        'themeWarning', 'themeDanger', 'themeBackground', 'themeSurface', 'themeText',
+    ];
+
+    /** Optional colours: "#rrggbb", or '' to follow the main palette. */
+    public const THEME_EXTRA_COLORS = [
+        'themeHeader', 'themeNav', 'themeNavActive', 'themeGradientFrom', 'themeGradientTo', 'themeStar', 'themeOffer',
+    ];
+
+    /** Dark-mode colours, all "#rrggbb". */
+    public const THEME_DARK_COLORS = ['themeDarkBackground', 'themeDarkSurface', 'themeDarkText'];
+
+    /** Fonts an admin can choose — each must be on Google Fonts (the client loads it from there). */
+    public const THEME_FONTS = [
+        'Poppins', 'Inter', 'Nunito', 'Montserrat', 'Roboto', 'Lato', 'Open Sans',
+        'Rubik', 'DM Sans', 'Outfit', 'Playfair Display', 'Mukta', 'Hind', 'Baloo 2',
     ];
 
     /**
@@ -88,6 +170,48 @@ class SettingService
         }
 
         return $all;
+    }
+
+    /**
+     * The public theme block for GET /config.
+     *
+     * @return array<string, mixed>
+     */
+    public function theme(): array
+    {
+        $all = $this->all();
+
+        $colors = [];
+        foreach (self::THEME_COLORS as $key) {
+            // "themePrimary" → "primary"
+            $colors[lcfirst(substr($key, 5))] = (string) $all[$key];
+        }
+
+        $extras = [];
+        foreach (self::THEME_EXTRA_COLORS as $key) {
+            // "themeNavActive" → "navActive"; '' → null (follow the palette).
+            $extras[lcfirst(substr($key, 5))] = filled($all[$key]) ? (string) $all[$key] : null;
+        }
+
+        return [
+            'colors' => $colors,
+            'extras' => $extras,
+            'mode' => (string) $all['themeMode'],
+            'dark' => [
+                'background' => (string) $all['themeDarkBackground'],
+                'surface' => (string) $all['themeDarkSurface'],
+                'text' => (string) $all['themeDarkText'],
+            ],
+            'radius' => (string) $all['themeRadius'],
+            'textSize' => (string) $all['themeTextSize'],
+            'font' => (string) $all['themeFont'],
+            'headingFont' => (string) $all['themeHeadingFont'],
+            'menuCardColors' => (bool) $all['menuCardColors'],
+            'icon' => [
+                'mode' => (string) $all['appIconMode'],
+                'version' => $all['appIconVersion'],
+            ],
+        ];
     }
 
     public function get(string $key, mixed $default = null): mixed

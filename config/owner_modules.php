@@ -21,6 +21,8 @@ return [
     'redeem' => ['name' => 'Redeem', 'description' => 'Redeem reward PINs at the counter'],
     'spin_rewards' => ['name' => 'Spin rewards', 'description' => 'Spinner offers'],
     'analytics' => ['name' => 'Analytics', 'description' => 'Business insights and stats'],
-    'reviews' => ['name' => 'Reviews', 'description' => 'Customer reviews and replies'],
+    'reels' => ['name' => 'Reels', 'description' => 'Short videos and photo reels shown on the customer home page'],
+    'customers' => ['name' => 'Customers', 'description' => 'The shop\'s own customer list, kept by mobile number'],
+    'reviews' => ['name' => 'Reviews', 'description' => 'Customer reviews, replies and the shareable review link'],
     'qr' => ['name' => 'QR code', 'description' => 'Business QR code'],
 ];

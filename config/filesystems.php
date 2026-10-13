@@ -41,7 +41,10 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Base URL for uploaded files. Defaults to this app's own /storage;
+            // a local copy of a live database can point it at the live site
+            // (PUBLIC_STORAGE_URL) to show the uploads it doesn't have on disk.
+            'url' => rtrim(env('PUBLIC_STORAGE_URL', rtrim(env('APP_URL', 'http://localhost'), '/').'/storage'), '/'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

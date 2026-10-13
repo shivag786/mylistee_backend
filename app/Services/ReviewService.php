@@ -6,7 +6,9 @@ use App\Enums\CoinSource;
 use App\Models\Business;
 use App\Models\Order;
 use App\Models\Review;
+use App\Models\ShopCustomer;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Customer reviews (document/phase/02 §Reviews). Reviews are a verified purchase:
@@ -41,6 +43,70 @@ class ReviewService
         }
 
         return $review->fresh('customer');
+    }
+
+    /**
+     * Create or update a review left through the shop's public review link.
+     * The reviewer is identified only by mobile (no OTP), so one review per
+     * mobile per shop: resubmitting edits it rather than piling up. An edit
+     * never touches moderation — a review an admin or the owner hid stays
+     * hidden. No coins: there is no account to credit.
+     *
+     * @param  list<array{type: string, id: int, name: string, rating: int}>  $items
+     */
+    public function upsertFromLink(
+        Business $business,
+        ShopCustomer $reviewer,
+        ?string $name,
+        ?int $rating,
+        ?string $comment,
+        array $items,
+    ): Review {
+        $review = DB::transaction(function () use ($business, $reviewer, $name, $rating, $comment, $items): Review {
+            $review = Review::firstOrNew([
+                'business_id' => $business->id,
+                'shop_customer_id' => $reviewer->id,
+            ]);
+            if (! $review->exists) {
+                $review->status = 'published';
+            }
+            $review->fill([
+                // Snapshotted so the review keeps its author if the owner later
+                // deletes the customer from their book.
+                'reviewer_name' => $name ?? $reviewer->name,
+                'rating' => $rating,
+                'comment' => $comment,
+            ])->save();
+
+            $review->items()->delete();
+            foreach ($items as $item) {
+                $review->items()->create([
+                    'item_type' => $item['type'],
+                    'product_id' => $item['type'] === 'product' ? $item['id'] : null,
+                    'combo_id' => $item['type'] === 'combo' ? $item['id'] : null,
+                    'name' => $item['name'],
+                    'rating' => $item['rating'],
+                ]);
+            }
+
+            return $review;
+        });
+
+        $business->recalculateRating();
+
+        return $review->fresh(['shopCustomer', 'items']);
+    }
+
+    /**
+     * Owner shows or hides a review on their public page. Hidden reviews still
+     * count toward the shop's rating — hiding is about what's displayed, not a
+     * way to drop low scores from the average.
+     */
+    public function setHiddenByOwner(Review $review, bool $hidden): Review
+    {
+        $review->update(['hidden_by_owner_at' => $hidden ? ($review->hidden_by_owner_at ?? now()) : null]);
+
+        return $review;
     }
 
     public function delete(Review $review): void

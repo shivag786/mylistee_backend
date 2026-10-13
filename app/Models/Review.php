@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -16,17 +17,20 @@ class Review extends Model
     protected $fillable = [
         'business_id',
         'customer_id',
+        'shop_customer_id',
+        'reviewer_name',
         'order_id',
         'rating',
         'comment',
         'reply',
         'replied_at',
         'status',
+        'hidden_by_owner_at',
     ];
 
     protected function casts(): array
     {
-        return ['rating' => 'integer', 'replied_at' => 'datetime'];
+        return ['rating' => 'integer', 'replied_at' => 'datetime', 'hidden_by_owner_at' => 'datetime'];
     }
 
     protected static function booted(): void
@@ -54,5 +58,23 @@ class Review extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    /** The link reviewer, when the review came from the shop's review link. @return BelongsTo<ShopCustomer, $this> */
+    public function shopCustomer(): BelongsTo
+    {
+        return $this->belongsTo(ShopCustomer::class);
+    }
+
+    /** Optional per-item star ratings. @return HasMany<ReviewItem, $this> */
+    public function items(): HasMany
+    {
+        return $this->hasMany(ReviewItem::class);
+    }
+
+    /** Who to show as the author: the account name, else the name typed on the link form. */
+    public function authorName(): ?string
+    {
+        return $this->customer?->name ?? $this->reviewer_name ?? $this->shopCustomer?->name;
     }
 }

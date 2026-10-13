@@ -42,6 +42,11 @@ class ConfigController extends Controller
             // Admin-configurable new-order alert sound for owners (null = built-in ding).
             'orderSoundUrl' => $this->settings->get('orderSoundUrl'),
             'ownerModules' => $ownerModules,
+            // Admin-set colours and fonts, applied app-wide on every device, plus
+            // whether shop menu cards are tinted with each dish's colours.
+            'theme' => $this->settings->theme(),
+            // Admin-arranged home page sections; null = the built-in order.
+            'homeLayout' => $this->settings->get('homeLayout'),
             // Whether a live payment gateway is wired up. Only a boolean — no key
             // is exposed here; the publishable key comes back from the checkout
             // call itself. The owner UI uses this to decide between the paid

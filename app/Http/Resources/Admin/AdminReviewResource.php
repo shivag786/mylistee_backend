@@ -18,10 +18,10 @@ class AdminReviewResource extends JsonResource
     {
         return [
             'id' => $this->uuid,
-            'rating' => (int) $this->rating,
+            'rating' => $this->rating,
             'comment' => $this->comment,
             'status' => $this->status,
-            'customerName' => $this->customer?->name,
+            'customerName' => $this->authorName(),
             'businessName' => $this->business?->name,
             'businessSlug' => $this->business?->slug,
             'createdAt' => $this->created_at?->toIso8601String(),

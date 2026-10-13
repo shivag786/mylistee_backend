@@ -28,7 +28,8 @@ class ReviewController extends Controller
 
         $reviews = $business->reviews()
             ->where('status', 'published')
-            ->with('customer')
+            ->whereNull('hidden_by_owner_at')
+            ->with(['customer', 'shopCustomer', 'items'])
             ->latest()
             ->get();
 

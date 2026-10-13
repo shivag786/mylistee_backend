@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\Business\BusinessController;
 use App\Http\Controllers\Api\V1\Business\BusinessGalleryController;
 use App\Http\Controllers\Api\V1\Business\CategoryRequestController as OwnerCategoryRequestController;
 use App\Http\Controllers\Api\V1\Business\ComboController;
+use App\Http\Controllers\Api\V1\Business\CustomerController as OwnerCustomerController;
 use App\Http\Controllers\Api\V1\Business\TokenLookupController;
 use App\Http\Controllers\Api\V1\Business\LoyaltyController;
 use App\Http\Controllers\Api\V1\Business\OfferController;
@@ -52,6 +53,7 @@ use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\OrderPaymentController;
 use App\Http\Controllers\Api\V1\PublicBusinessController;
 use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\V1\ReviewLinkController;
 use App\Http\Controllers\Api\V1\WalletTokenController;
 use App\Http\Controllers\Api\V1\Webhooks\RazorpayWebhookController;
 use App\Http\Controllers\Api\V1\LoyaltyController as CustomerLoyaltyController;
@@ -77,8 +79,29 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('businesses', [PublicBusinessController::class, 'index'])->name('businesses.index');
     Route::get('businesses/{slug}', [PublicBusinessController::class, 'show'])->name('businesses.show');
     Route::get('businesses/{slug}/reviews', [ReviewController::class, 'index'])->name('businesses.reviews');
+
+    // A shop's public review link — no account, mobile number only. Submitting
+    // is throttled per address here and per mobile in the controller.
+    Route::get('review-link/{slug}', [ReviewLinkController::class, 'show'])->name('review-link.show');
+    Route::post('review-link/{slug}', [ReviewLinkController::class, 'store'])
+        ->middleware('throttle:10,1')
+        ->name('review-link.store');
     Route::get('deals', [DealController::class, 'index'])->name('deals.index');
     Route::get('combos', [ComboFeedController::class, 'index'])->name('combos.feed');
+    // Installable-app branding that follows the admin theme (icons + manifest).
+    Route::get('app/icons/{name}.png', [\App\Http\Controllers\Api\V1\AppBrandingController::class, 'icon'])
+        ->where('name', '[a-z0-9-]+')
+        ->name('app.icon');
+    Route::get('app/manifest.webmanifest', [\App\Http\Controllers\Api\V1\AppBrandingController::class, 'manifest'])->name('app.manifest');
+
+    Route::get('home/spotlight', [\App\Http\Controllers\Api\V1\HomeSpotlightController::class, 'index'])->name('home.spotlight');
+
+    // Shop Reels
+    Route::get('reels', [\App\Http\Controllers\Api\V1\ReelFeedController::class, 'index'])->name('reels.index');
+    Route::get('businesses/{slug}/reels', [\App\Http\Controllers\Api\V1\ReelFeedController::class, 'forBusiness'])->name('businesses.reels');
+    Route::post('reels/{uuid}/view', [\App\Http\Controllers\Api\V1\ReelFeedController::class, 'view'])
+        ->middleware('throttle:60,1')
+        ->name('reels.view');
     Route::get('config', [ConfigController::class, 'index'])->name('config.index');
     Route::get('banners', [\App\Http\Controllers\Api\V1\BannerController::class, 'index'])->name('banners.index');
 
@@ -300,6 +323,21 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Reviews — owner reads & replies (Phase 1)
             Route::get('reviews', [OwnerReviewController::class, 'index'])->name('reviews.index');
             Route::post('reviews/{uuid}/reply', [OwnerReviewController::class, 'reply'])->name('reviews.reply');
+            Route::patch('reviews/{uuid}/visibility', [OwnerReviewController::class, 'visibility'])->name('reviews.visibility');
+
+            // Shop Reels — short videos or photo reels shown on the customer home
+            Route::get('reels', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'index'])->name('reels.index');
+            Route::post('reels', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'store'])
+                ->middleware('throttle:20,1')
+                ->name('reels.store');
+            Route::patch('reels/{uuid}/visibility', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'visibility'])->name('reels.visibility');
+            Route::delete('reels/{uuid}', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'destroy'])->name('reels.destroy');
+
+            // Customer book — the shop's own customers, kept by mobile number
+            Route::get('customers', [OwnerCustomerController::class, 'index'])->name('customers.index');
+            Route::post('customers', [OwnerCustomerController::class, 'store'])->name('customers.store');
+            Route::put('customers/{uuid}', [OwnerCustomerController::class, 'update'])->name('customers.update');
+            Route::delete('customers/{uuid}', [OwnerCustomerController::class, 'destroy'])->name('customers.destroy');
 
             // Loyalty (Listee Coins) config — earn rates + reward tiers (Phase 2)
             Route::get('loyalty', [LoyaltyController::class, 'show'])->name('loyalty.show');
@@ -395,6 +433,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::put('settings', [SettingController::class, 'update'])->name('settings.update');
             Route::post('settings/order-sound', [SettingController::class, 'uploadOrderSound'])->name('settings.order-sound.upload');
             Route::delete('settings/order-sound', [SettingController::class, 'deleteOrderSound'])->name('settings.order-sound.delete');
+            Route::post('settings/app-icon', [SettingController::class, 'uploadAppIcon'])->name('settings.app-icon.upload');
+            Route::delete('settings/app-icon', [SettingController::class, 'deleteAppIcon'])->name('settings.app-icon.delete');
             Route::get('cms', [CmsController::class, 'index'])->name('cms.index');
             Route::get('cms/{slug}', [CmsController::class, 'show'])->name('cms.show');
             Route::put('cms/{slug}', [CmsController::class, 'update'])->name('cms.update');

@@ -8,15 +8,19 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\DealResource;
 use App\Models\Product;
 use App\Support\ApiResponse;
+use App\Support\FeedRanker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 /**
  * Public "Today's Deals" feed for the customer home page: visible, in-stock
- * products across active shops that have a promotion running right now, best
- * discount first. Uses the Product model's promotion resolution so effective
- * prices are consistent with the business profile and owner catalogue.
+ * products across active shops that have a promotion running right now. Uses
+ * the Product model's promotion resolution so effective prices are consistent
+ * with the business profile and owner catalogue.
+ *
+ * Ranked per viewer (FeedRanker): followed shops, then nearby (optional
+ * `lat`/`lng`), then the biggest % off — at most two deals per shop.
  */
 class DealController extends Controller
 {
@@ -46,7 +50,7 @@ class DealController extends Controller
             ->limit(120)
             ->get();
 
-        $deals = $candidates
+        $live = $candidates
             // Any active promotion type qualifies (incl. BOGO / quantity discounts,
             // shown by label since they don't change the unit price). When a `type`
             // is requested, the active promotion must be of that type.
@@ -56,14 +60,22 @@ class DealController extends Controller
                 return $promotion !== null
                     && ($type === null || $promotion->promotion_type->value === $type);
             })
-            // Unit-price discounts first (biggest % off), then the rest.
-            ->sortByDesc(function (Product $product) {
-                $selling = (float) $product->selling_price;
-
-                return $selling > 0 ? ($selling - $product->effectivePrice()) / $selling : 0;
-            })
-            ->take($limit)
             ->values();
+
+        // Followed shops, then nearby, then the biggest % off — two deals per
+        // shop at most (FeedRanker). Label-only promotions (BOGO etc.) still
+        // place, on shop score alone.
+        $deals = FeedRanker::fromRequest($request)->rank(
+            $live,
+            fn (Product $product) => $product->business,
+            function (Product $product): float {
+                $selling = (float) $product->selling_price;
+                $pct = $selling > 0 ? (($selling - $product->effectivePrice()) / $selling) * 100 : 0;
+
+                return min($pct * 0.8, 40);
+            },
+            $limit,
+        );
 
         return ApiResponse::success(DealResource::collection($deals), 'Deals retrieved.');
     }

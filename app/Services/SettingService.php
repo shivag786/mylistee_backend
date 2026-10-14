@@ -56,8 +56,8 @@ class SettingService
         'themeBackground' => '#f8f9fa',
         'themeSurface' => '#ffffff',
         'themeText' => '#212121',
-        'themeFont' => 'Poppins',
-        'themeHeadingFont' => 'Poppins',
+        'themeFont' => 'Metropolis',
+        'themeHeadingFont' => 'Metropolis',
 
         // Optional colours: '' = follow the main palette (see THEME_EXTRA_COLORS).
         'themeHeader' => '',
@@ -120,9 +120,9 @@ class SettingService
     /** Dark-mode colours, all "#rrggbb". */
     public const THEME_DARK_COLORS = ['themeDarkBackground', 'themeDarkSurface', 'themeDarkText'];
 
-    /** Fonts an admin can choose — each must be on Google Fonts (the client loads it from there). */
+    /** Fonts an admin can choose — Metropolis ships with the client; the rest load from Google Fonts. */
     public const THEME_FONTS = [
-        'Poppins', 'Inter', 'Nunito', 'Montserrat', 'Roboto', 'Lato', 'Open Sans',
+        'Metropolis', 'Poppins', 'Inter', 'Nunito', 'Montserrat', 'Roboto', 'Lato', 'Open Sans',
         'Rubik', 'DM Sans', 'Outfit', 'Playfair Display', 'Mukta', 'Hind', 'Baloo 2',
     ];
 

@@ -26,7 +26,7 @@ class ThemeSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.theme.colors.primary', '#e23744')
             ->assertJsonPath('data.theme.colors.text', '#212121')
-            ->assertJsonPath('data.theme.font', 'Poppins')
+            ->assertJsonPath('data.theme.font', 'Metropolis')
             ->assertJsonPath('data.theme.menuCardColors', true);
     }
 

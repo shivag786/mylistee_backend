@@ -36,6 +36,7 @@ class BusinessResource extends JsonResource
             'openingTime' => $this->opening_time,
             'closingTime' => $this->closing_time,
             'isOpen' => $this->isOpenNow(),
+            'storeMode' => $this->hasStoreMode(),
             'phone' => $this->phone,
             'email' => $this->email,
             'website' => $this->website,

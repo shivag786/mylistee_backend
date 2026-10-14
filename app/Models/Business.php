@@ -344,6 +344,15 @@ class Business extends Model
         return $this->hasOne(QrCode::class)->where('type', 'primary');
     }
 
+    /**
+     * Premium "store mode": a customer arriving by this shop's link or QR sees
+     * only this shop — no other shops anywhere. A plan feature the admin ticks.
+     */
+    public function hasStoreMode(): bool
+    {
+        return (bool) $this->currentPlan()?->hasFeature('store_mode');
+    }
+
     public function isOpenNow(): bool
     {
         if (! $this->opening_time || ! $this->closing_time) {

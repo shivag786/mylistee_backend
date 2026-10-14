@@ -37,6 +37,8 @@ class PublicBusinessResource extends JsonResource
             'openingTime' => $this->opening_time,
             'closingTime' => $this->closing_time,
             'isOpen' => $this->isOpenNow(),
+            // Arriving by link/QR locks the customer app to this shop (premium).
+            'storeMode' => $this->hasStoreMode(),
             'phone' => $this->phone,
             'website' => $this->website,
             'facebook' => $this->facebook,

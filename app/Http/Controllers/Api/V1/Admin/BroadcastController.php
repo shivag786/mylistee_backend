@@ -36,7 +36,9 @@ class BroadcastController extends Controller
         // the actual delivery is handed to the queue.
         $recipients = SendBroadcastNotification::audienceQuery($validated['target'])->count();
 
-        SendBroadcastNotification::dispatch(
+        // After the response, in this process — the server has no queue worker,
+        // so a queued broadcast would never go out.
+        SendBroadcastNotification::dispatchAfterResponse(
             $validated['target'],
             $validated['title'],
             $validated['body'] ?? null,
@@ -53,7 +55,7 @@ class BroadcastController extends Controller
 
         return ApiResponse::success(
             ['sent' => $recipients],
-            "Broadcast queued for {$recipients} recipients.",
+            "Broadcast sending to {$recipients} recipients.",
         );
     }
 }

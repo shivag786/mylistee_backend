@@ -137,7 +137,7 @@ class AdminTest extends TestCase
         $this->assertDatabaseCount('notifications', 3);
     }
 
-    public function test_broadcast_is_queued_not_sent_synchronously(): void
+    public function test_broadcast_fans_out_after_the_response(): void
     {
         Queue::fake();
         User::factory()->count(2)->create(['role' => UserRole::Customer]);
@@ -152,7 +152,8 @@ class AdminTest extends TestCase
             // 2 customers + 3 owners + the admin sender = 6 active users.
             ->assertJsonPath('data.sent', 6);
 
-        // The request returned without doing the fan-out — the job carries it.
+        // The request returned without doing the fan-out — the job runs after the
+        // response (no queue worker needed on the server).
         $this->assertDatabaseCount('notifications', 0);
         Queue::assertPushed(SendBroadcastNotification::class, function ($job) {
             return $job->target === 'all' && $job->title === 'Platform update';

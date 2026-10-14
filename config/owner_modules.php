@@ -25,4 +25,5 @@ return [
     'customers' => ['name' => 'Customers', 'description' => 'The shop\'s own customer list, kept by mobile number'],
     'reviews' => ['name' => 'Reviews', 'description' => 'Customer reviews, replies and the shareable review link'],
     'qr' => ['name' => 'QR code', 'description' => 'Business QR code'],
+    'notifications' => ['name' => 'Notify customers', 'description' => 'Push notifications to followers and customers (monthly reach set per plan)'],
 ];

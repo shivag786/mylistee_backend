@@ -81,7 +81,7 @@ class OrderService
 
                 if (($item['type'] ?? null) === 'combo') {
                     $combo = $business->combos()->where('uuid', $item['id'])->first();
-                    if ($combo === null || ! $combo->is_visible) {
+                    if ($combo === null || ! $combo->isActiveNow()) {
                         throw ValidationException::withMessages(['items' => ['A combo in your cart is no longer available.']]);
                     }
                     $unit = (float) $combo->combo_price;

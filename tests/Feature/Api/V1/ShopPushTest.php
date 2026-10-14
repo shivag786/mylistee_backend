@@ -1,0 +1,154 @@
+<?php
+
+namespace Tests\Feature\Api\V1;
+
+use App\Enums\UserRole;
+use App\Enums\UserStatus;
+use App\Models\Business;
+use App\Models\Favorite;
+use App\Models\FeatureFlag;
+use App\Models\Order;
+use App\Models\Plan;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Tests\TestCase;
+
+/**
+ * Shop → customer push: off until the admin enables it, reaches only the
+ * shop's own followers/customers, and respects the plan's monthly reach, one
+ * send a day and quiet hours.
+ */
+class ShopPushTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['app.business_timezone' => 'Asia/Kolkata']);
+        // 11 AM in the shop's time zone — outside quiet hours.
+        Carbon::setTestNow(Carbon::parse('2026-10-14 11:00:00', 'Asia/Kolkata')->utc());
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
+    private function shop(): array
+    {
+        $owner = User::factory()->businessOwner()->create();
+        $business = Business::factory()->create(['owner_id' => $owner->id]);
+
+        return [$owner, $business];
+    }
+
+    private function customer(): User
+    {
+        return User::factory()->create(['role' => UserRole::Customer, 'status' => UserStatus::Active]);
+    }
+
+    private function token(User $user): static
+    {
+        $this->app['auth']->forgetGuards();
+
+        return $this->withToken($user->createToken('api')->plainTextToken);
+    }
+
+    private function enable(): void
+    {
+        FeatureFlag::where('key', 'owner_notifications')->update(['enabled' => true]);
+    }
+
+    public function test_it_is_off_until_the_admin_switches_it_on(): void
+    {
+        [$owner] = $this->shop();
+
+        $this->token($owner)->getJson('/api/v1/business/push')
+            ->assertOk()
+            ->assertJsonPath('data.blockedReason', 'Customer notifications are not switched on for shops yet.');
+
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Hi'])
+            ->assertStatus(422);
+    }
+
+    public function test_followers_get_it_and_strangers_do_not(): void
+    {
+        $this->enable();
+        [$owner, $business] = $this->shop();
+        $follower = $this->customer();
+        $buyer = $this->customer();
+        $stranger = $this->customer();
+        Favorite::create(['customer_id' => $follower->id, 'business_id' => $business->id]);
+        Order::factory()->create(['business_id' => $business->id, 'customer_id' => $buyer->id]);
+
+        $this->token($owner)->getJson('/api/v1/business/push')
+            ->assertJsonPath('data.blockedReason', null)
+            ->assertJsonPath('data.audiences.0.key', 'everyone')
+            ->assertJsonPath('data.audiences.0.count', 2)
+            ->assertJsonPath('data.audiences.1.count', 1);
+
+        $this->token($owner)->postJson('/api/v1/business/push', [
+            'audience' => 'followers',
+            'title' => 'Fresh cakes at 5 PM',
+            'body' => 'Come early!',
+        ])->assertCreated()->assertJsonPath('data.recipients', 1);
+
+        $this->assertDatabaseHas('notifications', ['user_id' => $follower->id, 'type' => 'shop_update']);
+        $this->assertDatabaseMissing('notifications', ['user_id' => $buyer->id]);
+        $this->assertDatabaseMissing('notifications', ['user_id' => $stranger->id]);
+    }
+
+    public function test_one_send_a_day_and_quiet_hours(): void
+    {
+        $this->enable();
+        [$owner, $business] = $this->shop();
+        Favorite::create(['customer_id' => $this->customer()->id, 'business_id' => $business->id]);
+
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'One'])
+            ->assertCreated();
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Two'])
+            ->assertStatus(422);
+
+        // Next day, but 11 PM — quiet hours.
+        Carbon::setTestNow(Carbon::parse('2026-10-15 23:00:00', 'Asia/Kolkata')->utc());
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Late'])
+            ->assertStatus(422);
+    }
+
+    public function test_the_plan_reach_caps_who_gets_it(): void
+    {
+        $this->enable();
+        Plan::factory()->create([
+            'is_default' => true,
+            'push_reach_per_month' => 2,
+            'max_push_per_month' => null,
+            'features' => ['push_notifications'],
+        ]);
+        [$owner, $business] = $this->shop();
+        foreach (range(1, 3) as $_) {
+            Favorite::create(['customer_id' => $this->customer()->id, 'business_id' => $business->id]);
+        }
+
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Hello'])
+            ->assertCreated()
+            ->assertJsonPath('data.recipients', 2);
+
+        $this->token($owner)->getJson('/api/v1/business/push')
+            ->assertJsonPath('data.reach.remaining', 0);
+    }
+
+    public function test_outside_links_are_rejected(): void
+    {
+        $this->enable();
+        [$owner] = $this->shop();
+
+        $this->token($owner)->postJson('/api/v1/business/push', [
+            'audience' => 'followers',
+            'title' => 'Hi',
+            'link' => 'https://evil.example',
+        ])->assertStatus(422)->assertJsonValidationErrors('link');
+    }
+}

@@ -62,6 +62,11 @@ class ConfigController extends Controller
                 'google' => (bool) $this->settings->get('loginGoogle', true),
                 'mobile' => (bool) $this->settings->get('loginMobile', false),
             ],
+            // So the home page can say what coins are worth in rupees.
+            'coins' => [
+                'value' => (int) config('loyalty.coin_value', 1),
+                'welcome' => (int) config('loyalty.earn.welcome', 0),
+            ],
         ], 'App config.');
     }
 }

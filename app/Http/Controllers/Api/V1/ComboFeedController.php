@@ -46,8 +46,10 @@ class ComboFeedController extends Controller
                 $total = $combo->totalPrice();
                 $savingPct = $total > 0 ? ($combo->savings() / $total) * 100 : 0;
                 $fresh = $combo->created_at?->gt(now()->subDays(7)) ? 5 : 0;
+                // Combos about to end move up — that's when they need eyes.
+                $endingSoon = $combo->auto_disable && $combo->ends_at?->between(now(), now()->addDay()) ? 10 : 0;
 
-                return min($savingPct * 0.8, 30) + $fresh;
+                return min($savingPct * 0.8, 30) + $fresh + $endingSoon;
             },
             $limit,
         );

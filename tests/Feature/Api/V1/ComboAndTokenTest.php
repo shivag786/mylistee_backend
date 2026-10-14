@@ -57,7 +57,48 @@ class ComboAndTokenTest extends TestCase
         $this->assertDatabaseCount('combo_items', 2);
     }
 
-    public function test_combo_requires_two_to_three_products(): void
+    public function test_a_blank_name_is_built_from_the_items(): void
+    {
+        [$owner, $business] = $this->ownerWithBusiness();
+        $a = Product::factory()->create(['business_id' => $business->id, 'name' => 'Burger']);
+        $b = Product::factory()->create(['business_id' => $business->id, 'name' => 'Coke']);
+
+        $id = $this->actingAsToken($owner)
+            ->postJson('/api/v1/business/combos', [
+                'combo_price' => 150,
+                'items' => [
+                    ['product_id' => $a->uuid, 'quantity' => 1],
+                    ['product_id' => $b->uuid, 'quantity' => 2],
+                ],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Burger + 2× Coke')
+            ->json('data.id');
+
+        // Clearing a custom name on edit goes back to the item-built one.
+        $this->actingAsToken($owner)->putJson("/api/v1/business/combos/{$id}", ['name' => 'Lunch deal'])
+            ->assertJsonPath('data.name', 'Lunch deal');
+        $this->actingAsToken($owner)->putJson("/api/v1/business/combos/{$id}", ['name' => ''])
+            ->assertJsonPath('data.name', 'Burger + 2× Coke');
+    }
+
+    public function test_a_combo_can_hold_up_to_five_products(): void
+    {
+        [$owner, $business] = $this->ownerWithBusiness();
+        $items = Product::factory()->count(6)->create(['business_id' => $business->id])
+            ->map(fn (Product $p) => ['product_id' => $p->uuid])->all();
+
+        $this->actingAsToken($owner)
+            ->postJson('/api/v1/business/combos', ['combo_price' => 300, 'items' => array_slice($items, 0, 5)])
+            ->assertCreated()
+            ->assertJsonCount(5, 'data.items');
+
+        $this->actingAsToken($owner)
+            ->postJson('/api/v1/business/combos', ['combo_price' => 300, 'items' => $items])
+            ->assertStatus(422);
+    }
+
+    public function test_combo_requires_at_least_two_products(): void
     {
         [$owner, $business] = $this->ownerWithBusiness();
         $a = Product::factory()->create(['business_id' => $business->id]);

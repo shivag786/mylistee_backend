@@ -62,6 +62,8 @@ class ProductResource extends JsonResource
                     'type' => $promotion->promotion_type->value,
                     'typeLabel' => $promotion->promotion_type->label(),
                     'label' => $promotion->displayLabel(),
+                    // Drives the menu countdown; only when it switches itself off.
+                    'endsAt' => $promotion->auto_stop ? $promotion->ends_at?->toIso8601String() : null,
                 ];
             }),
             'foodType' => $foodType,

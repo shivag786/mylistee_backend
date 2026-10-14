@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\Business\ProductCategoryController;
 use App\Http\Controllers\Api\V1\Business\ProductController;
 use App\Http\Controllers\Api\V1\Business\PromotionController;
 use App\Http\Controllers\Api\V1\Business\QrController;
+use App\Http\Controllers\Api\V1\Business\PushCampaignController;
 use App\Http\Controllers\Api\V1\Business\RedemptionController;
 use App\Http\Controllers\Api\V1\Business\ServiceSettingController;
 use App\Http\Controllers\Api\V1\Business\TableController;
@@ -303,6 +304,11 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::put('promotions/{uuid}', [PromotionController::class, 'update'])->name('promotions.update');
             Route::patch('promotions/{uuid}/status', [PromotionController::class, 'status'])->name('promotions.status');
             Route::delete('promotions/{uuid}', [PromotionController::class, 'destroy'])->name('promotions.destroy');
+
+            // Notify customers (push to followers / past customers, plan-capped).
+            Route::get('push', [PushCampaignController::class, 'show'])->name('push.show');
+            Route::post('push', [PushCampaignController::class, 'store'])
+                ->middleware('throttle:10,1')->name('push.store');
 
             Route::get('qr', [QrController::class, 'show'])->name('qr.show');
             Route::post('qr/download', [QrController::class, 'download'])->name('qr.download');

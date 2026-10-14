@@ -38,6 +38,9 @@ class BusinessListItemResource extends JsonResource
             'offerCount' => (int) ($this->offer_count ?? 0),
             'distanceMeters' => $this->getAttribute('distance_meters'),
             'isOpen' => $this->isOpenNow(),
+            // For "Open · till 10 PM" on the card.
+            'openingTime' => $this->opening_time,
+            'closingTime' => $this->closing_time,
             'isFavorite' => (bool) $this->getAttribute('is_favorite'),
             'verified' => (bool) $this->verified,
             // Spinnable now: active shop with at least one live offer to award.

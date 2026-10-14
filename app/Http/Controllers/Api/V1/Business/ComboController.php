@@ -12,7 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Combo builder CRUD for the owner (Phase 7.3). Combos bundle 2–3 of the
+ * Combo builder CRUD for the owner (Phase 7.3). Combos bundle 2–5 of the
  * business's products at a special price.
  */
 class ComboController extends Controller
@@ -78,10 +78,11 @@ class ComboController extends Controller
      */
     private function validateData(Request $request, bool $required = true): array
     {
-        $itemsRule = $required ? ['required', 'array', 'min:2', 'max:3'] : ['sometimes', 'array', 'min:2', 'max:3'];
+        $itemsRule = $required ? ['required', 'array', 'min:2', 'max:5'] : ['sometimes', 'array', 'min:2', 'max:5'];
 
         return $request->validate([
-            'name' => [$required ? 'required' : 'sometimes', 'string', 'max:120'],
+            // Optional: left blank, the combo is named after its items.
+            'name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'combo_price' => [$required ? 'required' : 'sometimes', 'numeric', 'min:0', 'max:9999999'],
             'product_category_id' => ['nullable', 'string'],
             'coins_earned' => ['nullable', 'integer', 'min:0', 'max:100000'],

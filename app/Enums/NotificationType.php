@@ -14,5 +14,6 @@ enum NotificationType: string
     case OfferExpiring = 'offer_expiring';
     case OrderPlaced = 'order_placed';
     case OrderUpdate = 'order_update';
+    case ShopUpdate = 'shop_update';
     case System = 'system';
 }

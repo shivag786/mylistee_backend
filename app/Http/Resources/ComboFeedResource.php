@@ -27,6 +27,8 @@ class ComboFeedResource extends JsonResource
             'comboPrice' => (float) $this->combo_price,
             'totalPrice' => $this->totalPrice(),
             'savings' => $this->savings(),
+            // Drives the customer countdown; only meaningful when it auto-hides.
+            'endsAt' => $this->auto_disable ? $this->ends_at?->toIso8601String() : null,
             'items' => ComboItemResource::collection($this->whenLoaded('items')),
             'business' => [
                 'slug' => $this->business->slug,

@@ -70,13 +70,13 @@ class OrderSystemTest extends TestCase
         [, $business] = $this->shop();
         $customer = $this->customer();
         app(LoyaltyService::class)->award($customer, CoinSource::Welcome, $business, ['amount' => 100]);
-        Product::factory()->create(['business_id' => $business->id, 'selling_price' => 100]);
-        $product = Product::first();
+        // Coins are a combo perk: only combos that accept coins can take them.
+        $combo = Combo::factory()->create(['business_id' => $business->id, 'combo_price' => 100, 'coins_accepted' => 500]);
 
         // Ask to use 9999 coins on a ₹100 order — capped to 100 balance then to subtotal.
         $this->token($customer)->postJson('/api/v1/orders', [
             'business' => $business->slug,
-            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'items' => [['type' => 'combo', 'id' => $combo->uuid, 'quantity' => 1]],
             'coinsToUse' => 9999,
         ])->assertCreated()
             ->assertJsonPath('data.coinsUsed', 100)
@@ -85,6 +85,24 @@ class OrderSystemTest extends TestCase
 
         // Balance is now 100 - 100 = 0.
         $this->assertSame(0, app(LoyaltyService::class)->balanceForBusiness($customer, $business));
+    }
+
+    public function test_coins_cannot_be_spent_on_plain_products(): void
+    {
+        [, $business] = $this->shop();
+        $customer = $this->customer();
+        app(LoyaltyService::class)->award($customer, CoinSource::Welcome, $business, ['amount' => 100]);
+        $product = Product::factory()->create(['business_id' => $business->id, 'selling_price' => 100]);
+
+        $this->token($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'coinsToUse' => 50,
+        ])->assertCreated()
+            ->assertJsonPath('data.coinsUsed', 0)
+            ->assertJsonPath('data.total', 100);
+
+        $this->assertSame(100, app(LoyaltyService::class)->balanceForBusiness($customer, $business));
     }
 
     public function test_owner_confirms_and_marks_paid_crediting_coins(): void
@@ -124,11 +142,11 @@ class OrderSystemTest extends TestCase
         [$owner, $business] = $this->shop();
         $customer = $this->customer();
         app(LoyaltyService::class)->award($customer, CoinSource::Welcome, $business, ['amount' => 50]);
-        $product = Product::factory()->create(['business_id' => $business->id, 'selling_price' => 100]);
+        $combo = Combo::factory()->create(['business_id' => $business->id, 'combo_price' => 100, 'coins_accepted' => 40]);
 
         $orderId = $this->token($customer)->postJson('/api/v1/orders', [
             'business' => $business->slug,
-            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'items' => [['type' => 'combo', 'id' => $combo->uuid, 'quantity' => 1]],
             'coinsToUse' => 40,
         ])->json('data.id');
 

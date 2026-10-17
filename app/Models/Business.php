@@ -71,6 +71,12 @@ class Business extends Model
             'google_review_count' => 'integer',
             'google_imported_at' => 'datetime',
             'google_last_sync' => 'datetime',
+            'personal_link_enabled' => 'boolean',
+            'personal_link_expires_at' => 'datetime',
+            'personal_link_trial_used_at' => 'datetime',
+            'personal_link_reminded_on' => 'date',
+            'closed_until' => 'datetime',
+            'orders_paused' => 'boolean',
         ];
     }
 
@@ -231,6 +237,12 @@ class Business extends Model
         return $this->hasMany(BusinessTable::class)->orderBy('sort_order')->orderBy('id');
     }
 
+    /** "Rewards & coupons" setup. @return HasOne<ShopRewardSetting, $this> */
+    public function rewardSetting(): HasOne
+    {
+        return $this->hasOne(ShopRewardSetting::class);
+    }
+
     /** Service configuration — which fulfilment modes + delivery fee. @return HasOne<BusinessServiceSetting, $this> */
     public function serviceSetting(): HasOne
     {
@@ -314,6 +326,12 @@ class Business extends Model
         $this->resolvedPlan = null;
     }
 
+    /** @return HasMany<PersonalLinkGrant, $this> */
+    public function personalLinkGrants(): HasMany
+    {
+        return $this->hasMany(PersonalLinkGrant::class);
+    }
+
     /** @return HasMany<Review, $this> */
     public function reviews(): HasMany
     {
@@ -350,11 +368,42 @@ class Business extends Model
      */
     public function hasStoreMode(): bool
     {
-        return (bool) $this->currentPlan()?->hasFeature('store_mode');
+        return $this->hasActivePersonalLink()
+            || (bool) $this->currentPlan()?->hasFeature('store_mode');
+    }
+
+    /**
+     * The personal link (store mode bought by the day — see PersonalLinkService):
+     * switched on by the owner, with trial or paid days left.
+     */
+    public function hasActivePersonalLink(): bool
+    {
+        return $this->personal_link_enabled
+            && $this->personal_link_expires_at !== null
+            && $this->personal_link_expires_at->isFuture();
+    }
+
+    /** The owner closed the shop for a while (Settings → Shop closed) and it has not reopened yet. */
+    public function isTemporarilyClosed(): bool
+    {
+        return $this->closed_until !== null && $this->closed_until->isFuture();
+    }
+
+    /**
+     * Can a customer place an order right now? Not while temporarily closed or
+     * with orders paused. (Shop hours are shown, not enforced — as before.)
+     */
+    public function acceptsOrders(): bool
+    {
+        return ! $this->isTemporarilyClosed() && ! $this->orders_paused;
     }
 
     public function isOpenNow(): bool
     {
+        if ($this->isTemporarilyClosed()) {
+            return false;
+        }
+
         if (! $this->opening_time || ! $this->closing_time) {
             return false;
         }

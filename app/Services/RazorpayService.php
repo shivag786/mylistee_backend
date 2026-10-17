@@ -118,6 +118,30 @@ class RazorpayService
     }
 
     /**
+     * Create a Razorpay Payment Link — a hosted page anyone can pay from (shared
+     * on WhatsApp, SMS or email), no Checkout or sign-in needed.
+     *
+     * @param  array<string, mixed>  $payload  amount (paise), description, customer, notify, notes, …
+     * @return array<string, mixed>  The raw link: id (plink_…), short_url, status.
+     */
+    public function createPaymentLink(array $payload): array
+    {
+        return $this->request('post', 'payment_links', $payload + ['currency' => 'INR', 'accept_partial' => false]);
+    }
+
+    /** @return array<string, mixed>  Includes status (created|paid|cancelled|expired) and payments. */
+    public function fetchPaymentLink(string $linkId): array
+    {
+        return $this->request('get', "payment_links/{$linkId}");
+    }
+
+    /** @return array<string, mixed> */
+    public function cancelPaymentLink(string $linkId): array
+    {
+        return $this->request('post', "payment_links/{$linkId}/cancel");
+    }
+
+    /**
      * Refund a captured payment. A null amount refunds the full remaining balance.
      *
      * @param  array<string, string>  $notes

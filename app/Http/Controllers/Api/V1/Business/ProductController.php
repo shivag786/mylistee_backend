@@ -89,6 +89,11 @@ class ProductController extends Controller
             'value' => ['required', 'boolean'],
         ]);
 
+        // Back in stock with a count of zero would sell what isn't there.
+        if ($validated['field'] === 'in_stock' && $validated['value'] && $product->stock_qty === 0) {
+            return ApiResponse::error('Add the new stock quantity first.', status: 422);
+        }
+
         $product->update([$validated['field'] => $validated['value']]);
 
         return ApiResponse::success(
@@ -153,6 +158,15 @@ class ProductController extends Controller
      */
     private function validateData(Request $request): array
     {
+        // Sizes, add-ons and the discount arrive as JSON strings inside the
+        // multipart form (which can't nest arrays of objects cleanly).
+        foreach (['variants', 'addons', 'discount'] as $key) {
+            $raw = $request->input($key);
+            if (is_string($raw)) {
+                $request->merge([$key => $raw === '' ? null : json_decode($raw, true)]);
+            }
+        }
+
         return $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'product_category_id' => ['nullable', 'string'],
@@ -169,8 +183,21 @@ class ProductController extends Controller
             'is_bestseller' => ['nullable', 'boolean'],
             'is_recommended' => ['nullable', 'boolean'],
             'in_stock' => ['nullable', 'boolean'],
+            // Empty = don't count stock for this product.
+            'stock_qty' => ['nullable', 'integer', 'min:0', 'max:1000000'],
             'is_visible' => ['nullable', 'boolean'],
             'image' => ['nullable', 'image', 'max:4096'],
+            'variants' => ['nullable', 'array', 'max:10'],
+            'variants.*.id' => ['nullable', 'string', 'max:16'],
+            'variants.*.name' => ['required', 'string', 'max:40'],
+            'variants.*.price' => ['required', 'numeric', 'min:0', 'max:9999999'],
+            'addons' => ['nullable', 'array', 'max:20'],
+            'addons.*.id' => ['nullable', 'string', 'max:16'],
+            'addons.*.name' => ['required', 'string', 'max:40'],
+            'addons.*.price' => ['required', 'numeric', 'min:0', 'max:9999999'],
+            'discount' => ['nullable', 'array'],
+            'discount.type' => ['required_with:discount', Rule::in(['percent', 'flat'])],
+            'discount.value' => ['required_with:discount', 'numeric', 'min:0', 'max:9999999'],
         ]);
     }
 

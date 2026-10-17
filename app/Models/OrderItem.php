@@ -16,6 +16,7 @@ class OrderItem extends Model
         'combo_id',
         'item_type',
         'name',
+        'options',
         'unit_price',
         'quantity',
         'coins_earned',
@@ -25,6 +26,7 @@ class OrderItem extends Model
     {
         return [
             'unit_price' => 'decimal:2',
+            'options' => 'array',
         ];
     }
 

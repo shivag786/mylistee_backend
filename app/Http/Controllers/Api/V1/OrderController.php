@@ -87,6 +87,10 @@ class OrderController extends Controller
             'items.*.type' => ['required', Rule::in(['product', 'combo'])],
             'items.*.id' => ['required', 'string'],
             'items.*.quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            // The size and add-ons picked for a product that has them.
+            'items.*.variant' => ['nullable', 'string', 'max:16'],
+            'items.*.addons' => ['nullable', 'array', 'max:20'],
+            'items.*.addons.*' => ['string', 'max:16'],
             'coinsToUse' => ['nullable', 'integer', 'min:0'],
             'note' => ['nullable', 'string', 'max:300'],
             'serviceType' => ['nullable', Rule::in(ServiceType::values())],
@@ -95,6 +99,7 @@ class OrderController extends Controller
             // Optional: a client that predates online payment sends none, which
             // means cash. See OrderService::place().
             'paymentChoice' => ['nullable', Rule::in([OrderPaymentService::CHOICE_ONLINE, OrderPaymentService::CHOICE_COD])],
+            'couponCode' => ['nullable', 'string', 'max:24'],
         ]);
 
         $business = Business::where('slug', $validated['business'])
@@ -114,6 +119,7 @@ class OrderController extends Controller
             $validated['table'] ?? null,
             $validated['serviceAddress'] ?? null,
             $validated['paymentChoice'] ?? null,
+            $validated['couponCode'] ?? null,
         );
 
         return ApiResponse::success(
@@ -121,5 +127,37 @@ class OrderController extends Controller
             'Order placed.',
             status: 201,
         );
+    }
+
+    /** POST /orders/quote — the cart's bill, priced exactly as the order will be. */
+    public function quote(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'business' => ['required', 'string'],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.type' => ['required', Rule::in(['product', 'combo'])],
+            'items.*.id' => ['required', 'string'],
+            'items.*.quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'items.*.variant' => ['nullable', 'string', 'max:16'],
+            'items.*.addons' => ['nullable', 'array', 'max:20'],
+            'items.*.addons.*' => ['string', 'max:16'],
+            'couponCode' => ['nullable', 'string', 'max:24'],
+            'serviceType' => ['nullable', Rule::in(ServiceType::values())],
+        ]);
+
+        $business = Business::where('slug', $validated['business'])
+            ->where('status', BusinessStatus::Active->value)
+            ->first();
+        if ($business === null) {
+            return ApiResponse::error('Business not found.', status: 404);
+        }
+
+        return ApiResponse::success($this->orders->quote(
+            $business,
+            $request->user('sanctum'),
+            $validated['items'],
+            $validated['couponCode'] ?? null,
+            isset($validated['serviceType']) ? ServiceType::from($validated['serviceType']) : null,
+        ), 'Quote.');
     }
 }

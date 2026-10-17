@@ -53,8 +53,12 @@ class ConfigController extends Controller
             // checkout flow and the pre-gateway simulated upgrade (local/demo).
             'payments' => [
                 'razorpay' => $this->razorpay->isConfigured(),
-                // Convenience fee on the online share of an order, in percent.
-                'convenienceFeePercent' => $this->razorpay->isConfigured() ? $this->razorpay->feePercent() : 0,
+                // Fee added to the customer's online share, in percent (0 by default).
+                'convenienceFeePercent' => $this->razorpay->isConfigured() ? (float) $this->settings->get('customerFeePercent', 0) : 0,
+                // Listee's cut of a shop's order: platform on every order, the
+                // gateway's on the online part. Shown to shops per product.
+                'platformFeePercent' => (float) $this->settings->get('platformFeePercent', 2.0),
+                'gatewayFeePercent' => $this->razorpay->feePercent(),
             ],
             // Which ways in the customer login page offers. SettingService keeps
             // at least one on, so the page is never left with nothing.

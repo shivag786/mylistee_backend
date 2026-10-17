@@ -40,6 +40,12 @@ class AdminOrderResource extends JsonResource
             'paymentType' => $this->paymentType(),
             'onlineAmount' => (float) $this->online_amount,
             'convenienceFee' => (float) $this->convenience_fee,
+            'billDiscount' => (float) $this->bill_discount,
+            'couponDiscount' => (float) $this->coupon_discount,
+            // Listee's cut (settled with the shop) and what the shop keeps.
+            'platformFee' => (float) $this->platform_fee,
+            'gatewayFee' => (float) $this->gateway_fee,
+            'vendorEarning' => $this->vendor_earning !== null ? (float) $this->vendor_earning : null,
             'paidOnline' => $this->isPaidOnline(),
             'amountDue' => $this->amountDue(),
             'payment' => $payment === null ? null : [

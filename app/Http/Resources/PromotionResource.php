@@ -20,7 +20,7 @@ class PromotionResource extends JsonResource
     public function toArray(Request $request): array
     {
         $type = $this->promotion_type instanceof PromotionType ? $this->promotion_type : null;
-        $status = $this->status instanceof PromotionStatus ? $this->status->value : $this->status;
+        $status = $this->effectiveStatus()->value;
         $config = $this->config ?? [];
 
         return [

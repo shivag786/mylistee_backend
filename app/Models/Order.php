@@ -33,6 +33,12 @@ class Order extends Model
         'payment_choice',
         'online_amount',
         'convenience_fee',
+        'platform_fee',
+        'gateway_fee',
+        'vendor_earning',
+        'bill_discount',
+        'coupon_id',
+        'coupon_discount',
         'online_paid_at',
         'subtotal',
         'coins_used',
@@ -40,6 +46,7 @@ class Order extends Model
         'total',
         'delivery_fee',
         'coins_earned',
+        'stock_deducted',
         'note',
         'service_address',
         'placed_at',
@@ -58,11 +65,17 @@ class Order extends Model
             'payment_method' => PaymentMethod::class,
             'online_amount' => 'decimal:2',
             'convenience_fee' => 'decimal:2',
+            'platform_fee' => 'decimal:2',
+            'gateway_fee' => 'decimal:2',
+            'vendor_earning' => 'decimal:2',
+            'bill_discount' => 'decimal:2',
+            'coupon_discount' => 'decimal:2',
             'online_paid_at' => 'datetime',
             'subtotal' => 'decimal:2',
             'coin_discount' => 'decimal:2',
             'total' => 'decimal:2',
             'delivery_fee' => 'decimal:2',
+            'stock_deducted' => 'array',
             'placed_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'paid_at' => 'datetime',
@@ -172,5 +185,11 @@ class Order extends Model
         }
 
         return ($type ?? ServiceType::default())->label();
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Relations\BelongsTo<Coupon, $this> */
+    public function coupon(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Coupon::class);
     }
 }

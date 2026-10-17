@@ -107,6 +107,9 @@ class PublicBusinessController extends Controller
 
         return ApiResponse::success([
             'business' => new PublicBusinessResource($business),
+            // Bill discount, come-back, loyalty progress and coupons — the
+            // "why order here" strip. Guests see the rules, not their progress.
+            'perks' => app(\App\Services\RewardService::class)->perks($business, $user),
             'spin' => [
                 'available' => $hasOffers,
                 'requiresLogin' => $user === null,

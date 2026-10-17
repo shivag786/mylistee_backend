@@ -19,3 +19,7 @@ Schedule::command('promotions:tick')->everyMinute()->withoutOverlapping();
 // withdrawn and their coins returned. Safe even if the money lands later -- a
 // late capture reinstates the order.
 Schedule::command('orders:release-unpaid')->everyFiveMinutes()->withoutOverlapping();
+
+// Personal link expiry reminders -- one a day per shop, from N days before it
+// runs out. No-op until an admin switches reminders on.
+Schedule::command('personal-link:remind')->dailyAt('10:00')->timezone(config('app.business_timezone'))->withoutOverlapping();

@@ -11,6 +11,7 @@ use App\Enums\ServiceType;
 use App\Models\Business;
 use App\Models\BusinessTable;
 use App\Models\Combo;
+use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Reward;
 use App\Models\User;
@@ -32,6 +33,9 @@ class OrderService
         private readonly NotificationService $notifications,
         private readonly LoyaltyService $loyalty,
         private readonly OrderPaymentService $payments,
+        private readonly StockService $stock,
+        private readonly RewardService $rewards,
+        private readonly PlatformFeeService $fees,
     ) {}
 
     /**
@@ -41,7 +45,7 @@ class OrderService
      * The service context (mode / table / address) is an additive layer: it never
      * changes how items, coins, or the token work — only how the order is served.
      *
-     * @param  array<int, array{type: string, id: string, quantity?: int}>  $items
+     * @param  array<int, array{type: string, id: string, quantity?: int, variant?: string|null, addons?: list<string>|null}>  $items
      *
      * @throws ValidationException
      */
@@ -55,9 +59,18 @@ class OrderService
         ?string $tableUuid = null,
         ?string $serviceAddress = null,
         ?string $paymentChoice = null,
+        ?string $couponCode = null,
     ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Your cart is empty.']]);
+        }
+
+        if ($business->isTemporarilyClosed()) {
+            $until = $business->closed_until->timezone(config('app.business_timezone'))->format('d M, h:i A');
+            throw ValidationException::withMessages(['business' => ["{$business->name} is closed until {$until}."]]);
+        }
+        if ($business->orders_paused) {
+            throw ValidationException::withMessages(['business' => ["{$business->name} is not taking orders right now. Please try again a little later."]]);
         }
 
         [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
@@ -68,68 +81,33 @@ class OrderService
         // message if this shop no longer takes cash.
         $paymentChoice ??= OrderPaymentService::CHOICE_COD;
 
-        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee, $paymentChoice): Order {
-            $lines = [];
-            $subtotal = 0.0;
-            $coinsEarned = 0;
-            // Coins are a combo perk: the most a customer can spend is the sum of
-            // each combo's owner-set "accept up to N coins", times its quantity.
-            $comboCoinCap = 0;
+        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee, $paymentChoice, $couponCode): Order {
+            $priced = $this->priceItems($business, $items);
+            $subtotal = $priced['subtotal'];
 
-            foreach ($items as $item) {
-                $quantity = max(1, (int) ($item['quantity'] ?? 1));
+            // The shop's automatic bill discount, then the one coupon applied.
+            ['billDiscount' => $billDiscount, 'coupon' => $coupon, 'couponDiscount' => $couponDiscount]
+                = $this->discounts($business, $customer, $subtotal, $couponCode);
+            $discounted = round($subtotal - $billDiscount - $couponDiscount, 2);
 
-                if (($item['type'] ?? null) === 'combo') {
-                    $combo = $business->combos()->where('uuid', $item['id'])->first();
-                    if ($combo === null || ! $combo->isActiveNow()) {
-                        throw ValidationException::withMessages(['items' => ['A combo in your cart is no longer available.']]);
-                    }
-                    $unit = (float) $combo->combo_price;
-                    $earn = (int) ($combo->coins_earned ?? 0);
-                    $coinsEarned += $earn * $quantity;
-                    $comboCoinCap += (int) ($combo->coins_accepted ?? 0) * $quantity;
-                    $lines[] = [
-                        'combo_id' => $combo->id,
-                        'item_type' => 'combo',
-                        'name' => $combo->name,
-                        'unit_price' => $unit,
-                        'quantity' => $quantity,
-                        'coins_earned' => $earn,
-                    ];
-                } else {
-                    $product = $business->products()->where('uuid', $item['id'])->with('promotions')->first();
-                    if ($product === null || ! $product->is_visible || ! $product->in_stock) {
-                        throw ValidationException::withMessages(['items' => ['A product in your cart is no longer available.']]);
-                    }
-                    $unit = $product->effectivePrice();
-                    $lines[] = [
-                        'product_id' => $product->id,
-                        'item_type' => 'product',
-                        'name' => $product->name,
-                        'unit_price' => $unit,
-                        'quantity' => $quantity,
-                        'coins_earned' => 0,
-                    ];
-                }
-
-                $subtotal += $unit * $quantity;
-            }
-
-            $subtotal = round($subtotal, 2);
-
-            // Apply wallet coins — capped by the balance, the subtotal's worth, and
+            // Apply wallet coins — capped by the balance, the bill's worth, and
             // what the cart's combos accept (0 ⇒ no coins can be spent on this order).
             $coinValue = max(1, (int) config('loyalty.coin_value', 1));
             $balance = $this->loyalty->balanceForBusiness($customer, $business);
-            $maxCoins = (int) min($balance, floor($subtotal / $coinValue), $comboCoinCap);
+            $maxCoins = (int) min($balance, floor($discounted / $coinValue), $priced['comboCoinCap']);
             $coinsUsed = max(0, min($coinsToUse, $maxCoins));
             $coinDiscount = round($coinsUsed * $coinValue, 2);
 
-            $total = round($subtotal - $coinDiscount + $deliveryFee, 2);
+            $total = round($discounted - $coinDiscount + $deliveryFee, 2);
             ['online' => $online, 'fee' => $fee] = $this->payments->split($business, $total, $paymentChoice);
+            // Listee's cut comes out of the shop's share, not the customer's bill.
+            $fees = $this->fees->split($total, $online);
 
             // Anything to collect online holds the order back until it lands.
             $awaitingPayment = $online > 0;
+
+            // Refuses the order (with "Only N left") when a counted product is short.
+            $stockTaken = $this->stock->deduct($priced['stockNeeds']);
 
             $order = Order::create([
                 'token' => $this->uniqueToken($business),
@@ -140,20 +118,31 @@ class OrderService
                 'payment_choice' => $paymentChoice,
                 'online_amount' => $online,
                 'convenience_fee' => $fee,
+                'platform_fee' => $fees['platform'],
+                'gateway_fee' => $fees['gateway'],
+                'vendor_earning' => $fees['vendor'],
                 'service_type' => $serviceType,
                 'subtotal' => $subtotal,
+                'bill_discount' => $billDiscount,
+                'coupon_id' => $coupon?->id,
+                'coupon_discount' => $couponDiscount,
                 'coins_used' => $coinsUsed,
                 'coin_discount' => $coinDiscount,
                 'total' => $total,
                 'delivery_fee' => $deliveryFee,
-                'coins_earned' => $coinsEarned,
+                'coins_earned' => $priced['coinsEarned'],
+                'stock_deducted' => $stockTaken === [] ? null : $stockTaken,
                 'note' => $note,
                 'service_address' => $serviceAddress,
                 'placed_at' => Carbon::now(),
             ]);
 
-            foreach ($lines as $line) {
+            foreach ($priced['lines'] as $line) {
                 $order->items()->create($line);
+            }
+
+            if ($coupon !== null) {
+                $this->rewards->redeem($coupon, $order, $customer, $couponDiscount);
             }
 
             if ($coinsUsed > 0) {
@@ -174,6 +163,163 @@ class OrderService
 
             return $order->load('items');
         });
+    }
+
+    /**
+     * What a cart costs before it is placed: the same pricing place() uses, so
+     * the cart shows exactly what the order will charge. Coins and the payment
+     * split are left to the cart (they depend on toggles it owns).
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<string, mixed>
+     *
+     * @throws ValidationException for an item that can't be sold (not for a bad coupon)
+     */
+    public function quote(Business $business, ?User $customer, array $items, ?string $couponCode, ?ServiceType $serviceType): array
+    {
+        $priced = $this->priceItems($business, $items);
+        $subtotal = $priced['subtotal'];
+
+        $couponError = null;
+        try {
+            $discounts = $this->discounts($business, $customer, $subtotal, $couponCode);
+        } catch (ValidationException $e) {
+            $couponError = collect($e->errors())->flatten()->first();
+            $discounts = $this->discounts($business, $customer, $subtotal, null);
+        }
+
+        $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
+        $savings = round($discounts['billDiscount'] + $discounts['couponDiscount'], 2);
+        $perks = $this->rewards->perks($business, $customer);
+
+        return [
+            // What this order earns for next time: the come-back coupon and a stamp.
+            'next' => ['comeback' => $perks['comeback'], 'loyalty' => $perks['loyalty']],
+            'subtotal' => $subtotal,
+            'billDiscount' => $discounts['billDiscount'],
+            'billNudge' => $this->rewards->billNudge($business, $subtotal),
+            'coupon' => $discounts['coupon'] ? $this->rewards->couponPayload($discounts['coupon']) : null,
+            'couponDiscount' => $discounts['couponDiscount'],
+            'couponError' => $couponError,
+            'savings' => $savings,
+            'deliveryFee' => $deliveryFee,
+            'comboCoinCap' => $priced['comboCoinCap'],
+            // Before coins; the cart takes any coins off this.
+            'total' => round($subtotal - $savings + $deliveryFee, 2),
+            'coupons' => $this->rewards->couponsFor($business, $customer)
+                ->map(fn ($c) => $this->rewards->couponPayload($c) + [
+                    'minBillMet' => $c->min_bill === null || $subtotal >= (float) $c->min_bill,
+                    'saves' => $c->min_bill === null || $subtotal >= (float) $c->min_bill
+                        ? $c->discountFor(max(0.0, $subtotal - $discounts['billDiscount']))
+                        : 0.0,
+                ])->all(),
+        ];
+    }
+
+    /**
+     * @return array{billDiscount: float, coupon: ?Coupon, couponDiscount: float}
+     *
+     * @throws ValidationException when the coupon can't be used
+     */
+    private function discounts(Business $business, ?User $customer, float $subtotal, ?string $couponCode): array
+    {
+        $billDiscount = $this->rewards->billDiscount($business, $subtotal);
+        $coupon = null;
+        $couponDiscount = 0.0;
+
+        if ($couponCode !== null && trim($couponCode) !== '') {
+            $coupon = $this->rewards->couponForCheckout($business, $customer, $couponCode, $subtotal);
+            $couponDiscount = $coupon->discountFor(max(0.0, $subtotal - $billDiscount));
+        }
+
+        return ['billDiscount' => $billDiscount, 'coupon' => $coupon, 'couponDiscount' => $couponDiscount];
+    }
+
+    /**
+     * Price each cart line from the database (never the client's prices) and
+     * gather what the order affects: coins, the coin cap, and stock.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array{lines: list<array<string, mixed>>, subtotal: float, coinsEarned: int, comboCoinCap: int, stockNeeds: array<int, int>}
+     *
+     * @throws ValidationException
+     */
+    private function priceItems(Business $business, array $items): array
+    {
+        $lines = [];
+        $subtotal = 0.0;
+        // Units each product sells in this order, alone or inside combos.
+        $stockNeeds = [];
+        $coinsEarned = 0;
+        // Coins are a combo perk: the most a customer can spend is the sum of
+        // each combo's owner-set "accept up to N coins", times its quantity.
+        $comboCoinCap = 0;
+
+        foreach ($items as $item) {
+            $quantity = max(1, (int) ($item['quantity'] ?? 1));
+
+            if (($item['type'] ?? null) === 'combo') {
+                $combo = $business->combos()->where('uuid', $item['id'])->first();
+                if ($combo === null || ! $combo->isActiveNow()) {
+                    throw ValidationException::withMessages(['items' => ['A combo in your cart is no longer available.']]);
+                }
+                foreach ($combo->items as $comboItem) {
+                    if ($comboItem->product_id !== null) {
+                        $stockNeeds[$comboItem->product_id] = ($stockNeeds[$comboItem->product_id] ?? 0)
+                            + max(1, (int) $comboItem->quantity) * $quantity;
+                    }
+                }
+                $unit = (float) $combo->combo_price;
+                $earn = (int) ($combo->coins_earned ?? 0);
+                $coinsEarned += $earn * $quantity;
+                $comboCoinCap += (int) ($combo->coins_accepted ?? 0) * $quantity;
+                $lines[] = [
+                    'combo_id' => $combo->id,
+                    'item_type' => 'combo',
+                    'name' => $combo->name,
+                    'unit_price' => $unit,
+                    'quantity' => $quantity,
+                    'coins_earned' => $earn,
+                ];
+            } else {
+                $product = $business->products()->where('uuid', $item['id'])->with('promotions')->first();
+                if ($product === null || ! $product->is_visible || ! $product->in_stock) {
+                    throw ValidationException::withMessages(['items' => ['A product in your cart is no longer available.']]);
+                }
+                $stockNeeds[$product->id] = ($stockNeeds[$product->id] ?? 0) + $quantity;
+                $variantId = $item['variant'] ?? null;
+                $addonIds = array_values($item['addons'] ?? []);
+                try {
+                    $unit = $product->priceFor($variantId, $addonIds);
+                } catch (\InvalidArgumentException $e) {
+                    throw ValidationException::withMessages(['items' => ["{$product->name}: {$e->getMessage()}"]]);
+                }
+                // Snapshot the picks by name, as the line's name and price are.
+                $variant = collect($product->variants())->firstWhere('id', $variantId);
+                $addons = collect($product->addons())->whereIn('id', $addonIds)->pluck('name')->values()->all();
+                $lines[] = [
+                    'product_id' => $product->id,
+                    'item_type' => 'product',
+                    'name' => $variant ? "{$product->name} ({$variant['name']})" : $product->name,
+                    'options' => $variant || $addons !== []
+                        ? ['variant' => $variant['name'] ?? null, 'addons' => $addons]
+                        : null,
+                    'unit_price' => $unit,
+                    'quantity' => $quantity,
+                    'coins_earned' => 0,
+                ];
+            }
+
+            $subtotal += $unit * $quantity;
+        }
+
+        return [
+            'lines' => $lines,
+            'subtotal' => round($subtotal, 2),
+            'coinsEarned' => $coinsEarned,
+            'comboCoinCap' => $comboCoinCap,
+            'stockNeeds' => $stockNeeds,
+        ];
     }
 
     /**
@@ -269,11 +415,16 @@ class OrderService
             ]);
         }
 
-        // Mint any next-visit coupons the combos offered.
+        // Mint any next-visit coupons the combos offered, and the shop's own
+        // come-back / loyalty coupons.
         $this->mintCoupons($order);
+        $earned = $this->rewards->issueAfterPaid($order);
 
         if ($order->customer) {
             $coins = $order->coins_earned > 0 ? " You earned {$order->coins_earned} coins." : '';
+            if ($earned !== []) {
+                $coins .= ' New reward unlocked: '.collect($earned)->map(fn ($c) => $c->label())->join(', ').' on your next order.';
+            }
             $this->notifications->notify(
                 $order->customer,
                 NotificationType::OrderUpdate,
@@ -293,6 +444,8 @@ class OrderService
         }
 
         $order->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
+        $this->stock->restore($order);
+        $this->rewards->release($order);
 
         // Return any coins spent on the order.
         if ($order->coins_used > 0 && $order->customer) {

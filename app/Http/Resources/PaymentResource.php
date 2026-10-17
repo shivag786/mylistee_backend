@@ -41,7 +41,10 @@ class PaymentResource extends JsonResource
             'orderToken' => $this->whenLoaded('order', fn () => $this->order?->token),
             'orderUuid' => $this->whenLoaded('order', fn () => $this->order?->uuid),
             'customerName' => $this->whenLoaded('order', fn () => $this->order?->customer?->name),
-            'planName' => $this->whenLoaded('plan', fn () => $this->plan->name),
+            // A personal-link pack has no plan row; name it by its days instead.
+            'planName' => $this->purpose === 'personal_link'
+                ? 'Personal link · '.($this->meta['days'] ?? '?').' days'
+                : $this->whenLoaded('plan', fn () => $this->plan?->name),
             'businessName' => $this->whenLoaded('business', fn () => $this->business->name),
             'invoiceNumber' => $this->whenLoaded('invoice', fn () => $this->invoice?->number),
         ];

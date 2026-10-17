@@ -1,0 +1,154 @@
+<?php
+
+namespace Tests\Feature\Api\V1;
+
+use App\Enums\UserRole;
+use App\Enums\UserStatus;
+use App\Models\Business;
+use App\Models\Coupon;
+use App\Models\Order;
+use App\Models\Product;
+use App\Models\User;
+use App\Services\SettingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+/** "Rewards & coupons": bill discount, come-back + loyalty coupons, codes, and Listee's fee. */
+class RewardsAndCouponsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function token(User $user): static
+    {
+        $this->app['auth']->forgetGuards();
+
+        return $this->withToken($user->createToken('api')->plainTextToken);
+    }
+
+    /** @return array{0: User, 1: Business, 2: Product} */
+    private function shop(): array
+    {
+        $owner = User::factory()->businessOwner()->create();
+        $business = Business::factory()->create(['owner_id' => $owner->id]);
+
+        return [$owner, $business, Product::factory()->create(['business_id' => $business->id, 'selling_price' => 250])];
+    }
+
+    private function customer(): User
+    {
+        return User::factory()->create(['role' => UserRole::Customer, 'status' => UserStatus::Active]);
+    }
+
+    private function setUpRewards(User $owner): void
+    {
+        $this->token($owner)->putJson('/api/v1/business/rewards', [
+            'bill_discount' => ['type' => 'flat', 'value' => 50, 'min_bill' => 400],
+            'comeback' => ['type' => 'percent', 'value' => 10, 'max_off' => 100, 'days' => 15],
+            'loyalty' => ['type' => 'flat', 'value' => 100, 'every' => 3],
+        ])->assertOk()->assertJsonPath('data.billDiscount.min_bill', 400);
+    }
+
+    private function order(User $customer, Business $business, Product $product, int $qty, ?string $code = null)
+    {
+        return $this->token($customer)->postJson('/api/v1/orders', array_filter([
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => $qty]],
+            'couponCode' => $code,
+        ]));
+    }
+
+    private function markPaid(User $owner, string $orderId): void
+    {
+        $this->token($owner)->patchJson("/api/v1/business/orders/{$orderId}/status", ['status' => 'confirmed'])->assertOk();
+        $this->token($owner)->patchJson("/api/v1/business/orders/{$orderId}/status", ['status' => 'paid'])->assertOk();
+    }
+
+    public function test_bill_discount_applies_above_the_minimum_and_quote_nudges_below_it(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $this->setUpRewards($owner);
+
+        // ₹250 — under ₹400, so a nudge rather than a discount (a guest can quote).
+        $this->postJson('/api/v1/orders/quote', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+        ])->assertOk()
+            ->assertJsonPath('data.billDiscount', 0)
+            ->assertJsonPath('data.billNudge.needed', 150)
+            ->assertJsonPath('data.billNudge.label', '₹50 off');
+
+        // ₹500 → ₹50 off; Listee's 2% comes out of the shop's share, not the bill.
+        $this->order($this->customer(), $business, $product, 2)->assertCreated()
+            ->assertJsonPath('data.billDiscount', 50)
+            ->assertJsonPath('data.total', 450);
+        $order = Order::latest('id')->first();
+        $this->assertSame('9.00', $order->platform_fee);
+        $this->assertSame('441.00', $order->vendor_earning);
+    }
+
+    public function test_paid_orders_earn_comeback_and_every_third_a_loyalty_coupon(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $this->setUpRewards($owner);
+        $customer = $this->customer();
+
+        foreach (range(1, 3) as $n) {
+            $this->markPaid($owner, $this->order($customer, $business, $product, 1)->json('data.id'));
+        }
+
+        // Three come-back coupons and one loyalty coupon on the third order.
+        $this->assertSame(3, Coupon::where('customer_id', $customer->id)->where('kind', 'comeback')->count());
+        $loyalty = Coupon::where('customer_id', $customer->id)->where('kind', 'loyalty')->sole();
+
+        $perks = $this->token($customer)->getJson("/api/v1/businesses/{$business->slug}")->assertOk()->json('data.perks');
+        $this->assertSame(0, $perks['loyalty']['done']);
+        $this->assertCount(4, $perks['coupons']);
+
+        // A guest sees the rules, but no progress and no one's personal coupons.
+        $this->app['auth']->forgetGuards();
+        $guest = $this->withHeaders(['Authorization' => ''])->getJson("/api/v1/businesses/{$business->slug}")->json('data.perks');
+        $this->assertNull($guest['loyalty']['done']);
+        $this->assertCount(0, $guest['coupons']);
+
+        // The loyalty coupon takes ₹100 off and is single-use; cancelling gives it back.
+        $orderId = $this->order($customer, $business, $product, 1, $loyalty->code)->assertCreated()
+            ->assertJsonPath('data.couponDiscount', 100)
+            ->assertJsonPath('data.couponCode', $loyalty->code)
+            ->json('data.id');
+        $this->order($customer, $business, $product, 1, $loyalty->code)->assertUnprocessable();
+
+        $this->token($owner)->patchJson("/api/v1/business/orders/{$orderId}/status", ['status' => 'cancelled'])->assertOk();
+        $this->order($customer, $business, $product, 1, $loyalty->code)->assertCreated();
+    }
+
+    public function test_owner_coupon_codes_check_minimum_bill_and_per_customer_use(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $this->token($owner)->postJson('/api/v1/business/coupons', [
+            'code' => 'welcome20', 'discountType' => 'percent', 'value' => 20, 'maxDiscount' => 60, 'minBill' => 300,
+        ])->assertCreated()->assertJsonPath('data.code', 'WELCOME20')->assertJsonPath('data.label', '20% off up to ₹60');
+
+        $customer = $this->customer();
+        $this->order($customer, $business, $product, 1, 'WELCOME20')->assertUnprocessable()
+            ->assertJsonFragment(['Add ₹50 more to use WELCOME20.']);
+        // 20% of ₹500 is ₹100, capped at ₹60.
+        $this->order($customer, $business, $product, 2, 'welcome20')->assertCreated()->assertJsonPath('data.couponDiscount', 60);
+        $this->order($customer, $business, $product, 2, 'WELCOME20')->assertUnprocessable()
+            ->assertJsonFragment(['You’ve already used this coupon.']);
+
+        // A bad code in a quote is reported, not thrown.
+        $this->postJson('/api/v1/orders/quote', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'couponCode' => 'NOPE',
+        ])->assertOk()->assertJsonPath('data.couponError', 'That code isn’t valid at this shop.');
+    }
+
+    public function test_online_orders_carry_the_gateway_share_too(): void
+    {
+        app(SettingService::class)->set(['platformFeePercent' => 2, 'razorpayFeePercent' => 2]);
+        $fees = app(\App\Services\PlatformFeeService::class)->split(500, 500);
+
+        $this->assertSame(['platform' => 10.0, 'gateway' => 10.0, 'vendor' => 480.0], $fees);
+    }
+}

@@ -70,6 +70,23 @@ class PromotionController extends Controller
         return ApiResponse::success(new PromotionResource($promotion->load('product')), 'Promotion updated.');
     }
 
+    /** POST /business/promotions/{uuid}/repeat — run the same offer again for N days. */
+    public function repeat(Request $request, string $uuid): JsonResponse
+    {
+        $promotion = $this->find($request, $uuid);
+        if ($promotion === null) {
+            return ApiResponse::error('Promotion not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'days' => ['required', 'integer', 'min:1', 'max:90'],
+        ]);
+
+        $copy = $this->promotions->repeat($promotion, (int) $validated['days'], $request->user());
+
+        return ApiResponse::success(new PromotionResource($copy), 'Offer repeated.', status: 201);
+    }
+
     /** PATCH /business/promotions/{uuid}/status — pause or resume. */
     public function status(Request $request, string $uuid): JsonResponse
     {

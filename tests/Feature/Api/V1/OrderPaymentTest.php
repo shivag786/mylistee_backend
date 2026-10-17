@@ -44,6 +44,9 @@ class OrderPaymentTest extends TestCase
             'razorpay.key_secret' => self::KEY_SECRET,
             'razorpay.webhook_secret' => self::WEBHOOK_SECRET,
         ]);
+        // The optional customer-side fee these tests price with (off by default:
+        // Listee's fee is now the shop's, see PlatformFeeService).
+        app(SettingService::class)->set(['customerFeePercent' => 2]);
     }
 
     /** @return array{0: User, 1: Business, 2: Product} */
@@ -135,7 +138,7 @@ class OrderPaymentTest extends TestCase
     {
         $this->connectGateway();
         [$owner, $business, $product] = $this->shop();
-        app(SettingService::class)->set(['razorpayFeePercent' => 2]);
+        app(SettingService::class)->set(['customerFeePercent' => 2]);
 
         $this->placeOrder($this->customer(), $business, $product, 'online')
             ->assertCreated()

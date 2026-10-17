@@ -40,7 +40,17 @@ class OrderResource extends JsonResource
             'subtotal' => (float) $this->subtotal,
             'coinsUsed' => (int) $this->coins_used,
             'coinDiscount' => (float) $this->coin_discount,
+            // The shop's automatic bill discount and the coupon applied.
+            'billDiscount' => (float) $this->bill_discount,
+            'couponDiscount' => (float) $this->coupon_discount,
+            'couponCode' => $this->coupon_id ? $this->coupon()->withTrashed()->value('code') : null,
             'deliveryFee' => (float) $this->delivery_fee,
+            // Listee's fee and what the shop keeps — for the shop's eyes only.
+            $this->mergeWhen($request->routeIs('business.*'), fn () => [
+                'platformFee' => (float) $this->platform_fee,
+                'gatewayFee' => (float) $this->gateway_fee,
+                'vendorEarning' => $this->vendor_earning !== null ? (float) $this->vendor_earning : null,
+            ]),
             'total' => (float) $this->total,
             // How the bill splits. `paymentChoice` is null on orders from before
             // online payment existed, which were all cash at the counter.

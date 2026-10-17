@@ -200,4 +200,27 @@ class PromotionService
 
         return $attributes;
     }
+
+    /**
+     * Run a past (or current) offer again: same product, type, discount and
+     * daily window, live from now for `$days` days (ending at that day's close).
+     * Counts against the plan's active-offer quota like any new offer.
+     */
+    public function repeat(Promotion $promotion, int $days, User $actor): Promotion
+    {
+        $business = $promotion->business;
+        $this->limits->assertCanActivatePromotion($business);
+
+        $now = Carbon::now();
+        $copy = $promotion->replicate(['uuid', 'status', 'created_by', 'updated_by', 'deleted_at']);
+        $copy->starts_at = $now;
+        $copy->ends_at = $now->copy()->addDays(max(1, $days) - 1)->endOfDay();
+        $copy->auto_start = true;
+        $copy->auto_stop = true;
+        $copy->status = PromotionStatus::Running;
+        $copy->created_by = $actor->id;
+        $copy->save();
+
+        return $copy->fresh(['product']);
+    }
 }

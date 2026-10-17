@@ -66,6 +66,20 @@ class ProductResource extends JsonResource
                     'endsAt' => $promotion->auto_stop ? $promotion->ends_at?->toIso8601String() : null,
                 ];
             }),
+            // Sizes carry their price after the product's own discount; any
+            // running promotion comes off at checkout, as for the plain price.
+            'variants' => array_map(fn (array $v): array => [
+                'id' => $v['id'],
+                'name' => $v['name'],
+                'price' => (float) $v['price'],
+                'sellingPrice' => $this->applyDiscount((float) $v['price']),
+            ], $this->variants()),
+            'addons' => array_map(fn (array $a): array => [
+                'id' => $a['id'],
+                'name' => $a['name'],
+                'price' => (float) $a['price'],
+            ], $this->addons()),
+            'discount' => $this->discount(),
             'foodType' => $foodType,
             'availableFrom' => $this->available_from,
             'availableTo' => $this->available_to,
@@ -76,6 +90,8 @@ class ProductResource extends JsonResource
             'orderCount' => $orderCount,
             'isPopular' => $orderCount !== null && $orderCount >= (int) config('orders.popular.threshold', 5),
             'inStock' => (bool) $this->in_stock,
+            // Units left, or null when the shop doesn't count this product.
+            'stockQty' => $this->stock_qty,
             'isVisible' => (bool) $this->is_visible,
             'position' => (int) $this->position,
             'createdAt' => $this->created_at?->toIso8601String(),

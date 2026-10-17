@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Webhooks;
 
 use App\Http\Controllers\Controller;
 use App\Services\OrderPaymentService;
+use App\Services\PersonalLinkService;
 use App\Services\RazorpayService;
 use App\Services\SubscriptionPaymentService;
 use App\Support\ApiResponse;
@@ -34,6 +35,7 @@ class RazorpayWebhookController extends Controller
         private readonly RazorpayService $razorpay,
         private readonly SubscriptionPaymentService $payments,
         private readonly OrderPaymentService $orderPayments,
+        private readonly PersonalLinkService $personalLinks,
     ) {}
 
     /** POST /webhooks/razorpay */
@@ -59,6 +61,9 @@ class RazorpayWebhookController extends Controller
             // capture activates a plan, and an order has no plan -- it would log a
             // critical error and leave the order unreleased.
             $result = $this->orderPayments->handleWebhook($payload);
+            if ($result === 'not_ours') {
+                $result = $this->personalLinks->handleWebhook($payload);
+            }
             if ($result === 'not_ours') {
                 $result = $this->payments->handleWebhook($payload);
             }

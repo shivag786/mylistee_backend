@@ -27,6 +27,7 @@ class Product extends Model
         'image_path',
         'mrp',
         'selling_price',
+        'options',
         'food_type',
         'available_from',
         'available_to',
@@ -35,6 +36,7 @@ class Product extends Model
         'is_bestseller',
         'is_recommended',
         'in_stock',
+        'stock_qty',
         'is_visible',
         'position',
         'created_by',
@@ -47,10 +49,12 @@ class Product extends Model
             'food_type' => FoodType::class,
             'mrp' => 'decimal:2',
             'selling_price' => 'decimal:2',
+            'options' => 'array',
             'is_todays_special' => 'boolean',
             'is_bestseller' => 'boolean',
             'is_recommended' => 'boolean',
             'in_stock' => 'boolean',
+            'stock_qty' => 'integer',
             'is_visible' => 'boolean',
         ];
     }
@@ -128,5 +132,83 @@ class Product extends Model
             ->filter(fn (Promotion $p) => $p->isActiveNow())
             ->sortByDesc('priority')
             ->first();
+    }
+
+    /**
+     * Sizes the customer picks one of ("Small", "Large"), each with its own
+     * price before any discount.
+     *
+     * @return list<array{id: string, name: string, price: float}>
+     */
+    public function variants(): array
+    {
+        return array_values($this->options['variants'] ?? []);
+    }
+
+    /**
+     * Extras the customer may add any of ("Extra cheese"), each priced on top.
+     *
+     * @return list<array{id: string, name: string, price: float}>
+     */
+    public function addons(): array
+    {
+        return array_values($this->options['addons'] ?? []);
+    }
+
+    /** @return array{type: string, value: float}|null  type: percent | flat */
+    public function discount(): ?array
+    {
+        $discount = $this->options['discount'] ?? null;
+
+        return is_array($discount) && (float) ($discount['value'] ?? 0) > 0 ? $discount : null;
+    }
+
+    /** A price after this product's own % / ₹ discount (never below zero). */
+    public function applyDiscount(float $price): float
+    {
+        $discount = $this->discount();
+        if ($discount === null) {
+            return $price;
+        }
+        $off = $discount['type'] === 'percent'
+            ? $price * min(100.0, (float) $discount['value']) / 100
+            : (float) $discount['value'];
+
+        return round(max(0.0, $price - $off), 2);
+    }
+
+    /**
+     * What one unit costs with the customer's picks: the chosen size (or the
+     * plain price), less any running promotion, plus the add-ons.
+     *
+     * @param  list<string>  $addonIds
+     *
+     * @throws \InvalidArgumentException when a pick isn't on this product
+     */
+    public function priceFor(?string $variantId, array $addonIds = []): float
+    {
+        $variants = $this->variants();
+        if ($variants === []) {
+            $base = (float) $this->selling_price;
+        } else {
+            $variant = collect($variants)->firstWhere('id', $variantId);
+            if ($variant === null) {
+                throw new \InvalidArgumentException('Choose a size.');
+            }
+            $base = $this->applyDiscount((float) $variant['price']);
+        }
+
+        $promotion = $this->activePromotion();
+        $unit = $promotion === null ? $base : round($base - $promotion->discountAmount($base), 2);
+
+        $addons = collect($this->addons())->keyBy('id');
+        foreach (array_unique($addonIds) as $id) {
+            if (! $addons->has($id)) {
+                throw new \InvalidArgumentException('An add-on is no longer available.');
+            }
+            $unit += (float) $addons[$id]['price'];
+        }
+
+        return round($unit, 2);
     }
 }

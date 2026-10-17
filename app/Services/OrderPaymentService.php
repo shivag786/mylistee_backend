@@ -50,6 +50,8 @@ class OrderPaymentService
         private readonly ServiceSettingService $serviceSettings,
         private readonly LoyaltyService $loyalty,
         private readonly NotificationService $notifications,
+        private readonly StockService $stock,
+        private readonly RewardService $rewards,
     ) {}
 
     /**
@@ -72,7 +74,9 @@ class OrderPaymentService
             'codAvailable' => ! $online || (bool) $setting->cod_enabled,
             'paymentMode' => $setting->payment_mode ?? 'full',
             'partialPercent' => (int) ($setting->partial_percent ?? 50),
-            'feePercent' => $online ? $this->razorpay->feePercent() : 0.0,
+            // A fee added to the customer's online payment. Off by default: the
+            // gateway's cost is now part of Listee's fee to the shop.
+            'feePercent' => $online ? max(0.0, (float) app(SettingService::class)->get('customerFeePercent', 0.0)) : 0.0,
         ];
     }
 
@@ -279,6 +283,8 @@ class OrderPaymentService
             }
 
             $locked->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
+            $this->stock->restore($locked);
+            $this->rewards->release($locked);
 
             if ($locked->coins_used > 0 && $locked->customer) {
                 $this->loyalty->refund(
@@ -426,6 +432,8 @@ class OrderPaymentService
         }
 
         $order->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
+        $this->stock->restore($order);
+        $this->rewards->release($order);
         $order->loadMissing('customer', 'business');
 
         if ($order->coins_used > 0 && $order->customer && $order->business) {

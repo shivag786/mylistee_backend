@@ -25,6 +25,7 @@ class Payment extends Model
         'invoice_id',
         'subscription_id',
         'order_id',
+        'purpose',
         'created_by',
         'gateway',
         'gateway_order_id',

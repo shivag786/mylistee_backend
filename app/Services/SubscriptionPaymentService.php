@@ -304,6 +304,7 @@ class SubscriptionPaymentService
     {
         $payment = Payment::where('business_id', $business->id)
             ->where('gateway_order_id', $orderId)
+            ->where('purpose', 'plan')
             ->lockForUpdate()
             ->first();
 
@@ -403,6 +404,7 @@ class SubscriptionPaymentService
             // it would do real damage, so this does not rely on the routing.
             $payment = Payment::where('gateway_order_id', $orderId)
                 ->whereNull('order_id')
+                ->where('purpose', 'plan')
                 ->lockForUpdate()
                 ->first();
 
@@ -437,6 +439,7 @@ class SubscriptionPaymentService
     {
         $payment = Payment::where('gateway_order_id', (string) ($entity['order_id'] ?? ''))
             ->whereNull('order_id')
+            ->where('purpose', 'plan')
             ->first();
 
         if ($payment === null || $payment->status === PaymentStatus::Captured) {

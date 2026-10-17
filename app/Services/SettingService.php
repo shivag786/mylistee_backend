@@ -37,6 +37,32 @@ class SettingService
         // Convenience fee, as a percentage of the amount a customer pays online.
         // Added to their bill, never taken out of the shop's price.
         'razorpayFeePercent' => 2.0,
+        // Listee's own share of every order, taken from the shop's earning
+        // (with razorpayFeePercent on the online part). Shown to shops per product.
+        'platformFeePercent' => 2.0,
+        // An optional fee added to a customer's online payment. 0 = the
+        // customer pays the same price online or in cash.
+        'customerFeePercent' => 0.0,
+
+        // Personal link (store mode by the day — PersonalLinkService). A free
+        // trial once per shop, then the packs below. Prices in rupees.
+        'personalLinkTrialDays' => 7,
+        'personalLinkPrice30' => 150,
+        'personalLinkPrice90' => 399,
+        'personalLinkPrice365' => 1499,
+
+        // Expiry reminders to the shop owner, once a day from N days before
+        // the link runs out. Off until an admin switches them on. {shop},
+        // {days} and {date} are filled in per shop.
+        'personalLinkReminderEnabled' => false,
+        'personalLinkReminderDays' => 2,
+        'personalLinkReminderTitle' => 'Your personal link expires in {days}',
+        'personalLinkReminderBody' => 'Hi {shop}, your personal shop link stops on {date}. Renew now so customers who scan your QR keep seeing only your shop.',
+        // Also email the reminder (to the shop's email), sent through a Gmail
+        // account with an App Password. In-app + push go out regardless.
+        'personalLinkReminderEmail' => false,
+        'gmailAddress' => '',
+        'gmailAppPassword' => '',
 
         // Which sign-in methods the customer login page offers. At least one
         // stays on -- see set().
@@ -134,7 +160,7 @@ class SettingService
      *
      * @var list<string>
      */
-    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret'];
+    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'gmailAppPassword'];
 
     /**
      * All settings merged over their defaults.

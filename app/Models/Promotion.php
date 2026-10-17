@@ -160,4 +160,26 @@ class Promotion extends Model
         // Accept "H:i" or "H:i:s"; compare as "H:i:s".
         return strlen($time) === 5 ? $time.':00' : $time;
     }
+
+    /**
+     * The status the schedule implies right now. Statuses are advanced by the
+     * `promotions:tick` command; where that cron isn't running (or hasn't yet
+     * this minute), a finished offer would still read "running". This doesn't
+     * wait for it.
+     */
+    public function effectiveStatus(?Carbon $now = null): PromotionStatus
+    {
+        $now ??= Carbon::now();
+        $live = in_array($this->status, [PromotionStatus::Running, PromotionStatus::Scheduled], true);
+
+        if ($live && $this->auto_stop && $this->ends_at !== null && $now->gt($this->ends_at)) {
+            return PromotionStatus::Expired;
+        }
+        if ($this->status === PromotionStatus::Scheduled && $this->auto_start
+            && ($this->starts_at === null || $now->gte($this->starts_at))) {
+            return PromotionStatus::Running;
+        }
+
+        return $this->status;
+    }
 }

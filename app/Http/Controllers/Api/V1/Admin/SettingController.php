@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\AppIconService;
 use App\Services\AuditService;
+use App\Services\GmailMailer;
 use App\Services\ImageStorageService;
 use App\Services\SettingService;
 use App\Support\ApiResponse;
@@ -85,6 +86,21 @@ class SettingController extends Controller
             // Capped well below anything a real gateway charges, so a typo such
             // as 25 instead of 2.5 cannot quietly quadruple every online bill.
             'razorpayFeePercent' => ['sometimes', 'numeric', 'min:0', 'max:10'],
+            'platformFeePercent' => ['sometimes', 'numeric', 'min:0', 'max:30'],
+            'customerFeePercent' => ['sometimes', 'numeric', 'min:0', 'max:10'],
+
+            // Personal link packs + expiry reminders
+            'personalLinkTrialDays' => ['sometimes', 'integer', 'min:0', 'max:60'],
+            'personalLinkPrice30' => ['sometimes', 'numeric', 'min:1', 'max:100000'],
+            'personalLinkPrice90' => ['sometimes', 'numeric', 'min:1', 'max:100000'],
+            'personalLinkPrice365' => ['sometimes', 'numeric', 'min:1', 'max:100000'],
+            'personalLinkReminderEnabled' => ['sometimes', 'boolean'],
+            'personalLinkReminderDays' => ['sometimes', 'integer', 'min:1', 'max:15'],
+            'personalLinkReminderTitle' => ['sometimes', 'string', 'max:120'],
+            'personalLinkReminderBody' => ['sometimes', 'string', 'max:500'],
+            'personalLinkReminderEmail' => ['sometimes', 'boolean'],
+            'gmailAddress' => ['sometimes', 'nullable', 'email', 'max:120'],
+            'gmailAppPassword' => ['sometimes', 'nullable', 'string', 'max:64'],
 
             'loginGoogle' => ['sometimes', 'boolean'],
             'loginMobile' => ['sometimes', 'boolean'],
@@ -124,6 +140,26 @@ class SettingController extends Controller
         $this->audit->log($request->user(), 'settings.update', null, 'Updated platform settings', array_keys($validated));
 
         return ApiResponse::success($this->settings->masked(), 'Settings updated.');
+    }
+
+    /** POST /admin/settings/test-email — send a test mail through the saved Gmail account. */
+    public function testEmail(Request $request, GmailMailer $mailer): JsonResponse
+    {
+        $validated = $request->validate(['to' => ['required', 'email', 'max:120']]);
+
+        if (! $mailer->isConfigured()) {
+            return ApiResponse::error('Save a Gmail address and App Password first.', status: 422);
+        }
+
+        $ok = $mailer->send(
+            $validated['to'],
+            'Test email from '.$this->settings->get('brandName'),
+            'Gmail is connected. Personal link reminders can now be emailed to shop owners.',
+        );
+
+        return $ok
+            ? ApiResponse::success(null, 'Test email sent. Check the inbox (and spam).')
+            : ApiResponse::error('Gmail refused the login. Check the address and use an App Password (Google Account → Security → App passwords).', status: 422);
     }
 
     /**

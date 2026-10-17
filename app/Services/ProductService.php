@@ -8,6 +8,7 @@ use App\Models\ProductImage;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Product catalogue management for the owner (Phase 7.2). Handles the menu
@@ -33,6 +34,7 @@ class ProductService
         );
 
         $product = new Product($this->attributes($data));
+        $product->options = $this->options($data, null);
         $product->business_id = $business->id;
         $product->product_category_id = $category?->id;
         $product->created_by = $actor->id;
@@ -62,6 +64,7 @@ class ProductService
         }
 
         $product->fill($this->attributes($data));
+        $product->options = $this->options($data, $product->options);
         $product->updated_by = $actor->id;
 
         if ($image !== null) {
@@ -119,7 +122,7 @@ class ProductService
     {
         $fields = [
             'name', 'description', 'ingredients', 'mrp', 'selling_price', 'food_type',
-            'available_from', 'available_to', 'prep_minutes',
+            'available_from', 'available_to', 'prep_minutes', 'stock_qty',
         ];
         $flags = [
             'is_todays_special', 'is_bestseller', 'is_recommended', 'in_stock', 'is_visible',
@@ -137,6 +140,49 @@ class ProductService
             }
         }
 
+        // A count decides stock: zero is sold out, a fresh count is back on sale.
+        if (array_key_exists('stock_qty', $data) && $data['stock_qty'] !== null && $data['stock_qty'] !== '') {
+            $attributes['stock_qty'] = (int) $data['stock_qty'];
+            $attributes['in_stock'] = (int) $data['stock_qty'] > 0;
+        }
+
         return $attributes;
+    }
+
+    /**
+     * Merge sizes / add-ons / discount from a request into the stored options.
+     * A key left out of the request keeps its stored value; an empty list or a
+     * null discount clears it. Each size and add-on keeps a short stable id, so
+     * a cart that picked "Large" still matches after the owner renames it.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<string, mixed>|null  $current
+     * @return array<string, mixed>|null
+     */
+    private function options(array $data, ?array $current): ?array
+    {
+        $options = $current ?? [];
+
+        foreach (['variants', 'addons'] as $key) {
+            if (! array_key_exists($key, $data)) {
+                continue;
+            }
+            $options[$key] = array_values(array_map(fn (array $row): array => [
+                'id' => filled($row['id'] ?? null) ? (string) $row['id'] : Str::lower(Str::random(8)),
+                'name' => trim((string) $row['name']),
+                'price' => round((float) $row['price'], 2),
+            ], $data[$key] ?? []));
+        }
+
+        if (array_key_exists('discount', $data)) {
+            $discount = $data['discount'];
+            $options['discount'] = is_array($discount) && (float) ($discount['value'] ?? 0) > 0
+                ? ['type' => $discount['type'], 'value' => round((float) $discount['value'], 2)]
+                : null;
+        }
+
+        $options = array_filter($options, fn ($v) => $v !== null && $v !== []);
+
+        return $options === [] ? null : $options;
     }
 }

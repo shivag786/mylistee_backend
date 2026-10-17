@@ -47,7 +47,7 @@ class BusinessDiscoveryService
             ->where(fn ($q) => $q
                 ->whereHas('category', fn ($c) => $c->where('show_in_search', true))
                 ->orWhereNull('category_id'))
-            ->with('category')
+            ->with(['category', 'rewardSetting'])
             ->withCount(['offers as offer_count' => fn ($q) => $q->live()]);
 
         if (! empty($filters['search'])) {

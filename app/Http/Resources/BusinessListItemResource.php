@@ -38,6 +38,10 @@ class BusinessListItemResource extends JsonResource
             'offerCount' => (int) ($this->offer_count ?? 0),
             'distanceMeters' => $this->getAttribute('distance_meters'),
             'isOpen' => $this->isOpenNow(),
+            // Temporarily closed by the owner until this time (null = not closed).
+            'closedUntil' => $this->isTemporarilyClosed() ? $this->closed_until->toIso8601String() : null,
+            'closedNote' => $this->isTemporarilyClosed() ? $this->closed_note : null,
+            'ordersPaused' => (bool) $this->orders_paused,
             // For "Open · till 10 PM" on the card.
             'openingTime' => $this->opening_time,
             'closingTime' => $this->closing_time,
@@ -47,6 +51,8 @@ class BusinessListItemResource extends JsonResource
             'spinAvailable' => $this->status === BusinessStatus::Active && (int) ($this->offer_count ?? 0) > 0,
             // Recently onboarded (last 3 days) — powers the "New" badge/row.
             'isNew' => $this->created_at !== null && $this->created_at->gt(now()->subDays(3)),
+            // "₹50 off above ₹499" — the shop's headline reward, or null.
+            'perk' => app(\App\Services\RewardService::class)->headline($this->resource->rewardSetting),
             'status' => $this->status->value,
         ];
     }

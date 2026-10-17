@@ -37,6 +37,10 @@ class PublicBusinessResource extends JsonResource
             'openingTime' => $this->opening_time,
             'closingTime' => $this->closing_time,
             'isOpen' => $this->isOpenNow(),
+            // Temporarily closed by the owner until this time (null = not closed).
+            'closedUntil' => $this->isTemporarilyClosed() ? $this->closed_until->toIso8601String() : null,
+            'closedNote' => $this->isTemporarilyClosed() ? $this->closed_note : null,
+            'ordersPaused' => (bool) $this->orders_paused,
             // Arriving by link/QR locks the customer app to this shop (premium).
             'storeMode' => $this->hasStoreMode(),
             'phone' => $this->phone,

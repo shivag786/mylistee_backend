@@ -5,9 +5,8 @@ namespace App\Services;
 use Kreait\Firebase\Contract\Auth as FirebaseAuth;
 use Kreait\Firebase\Contract\Messaging as FirebaseMessaging;
 use Kreait\Firebase\Factory;
+use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Messaging\CloudMessage;
-use Kreait\Firebase\Messaging\MulticastSendReport;
-use Kreait\Firebase\Messaging\Notification as FcmNotification;
 
 /**
  * Thin wrapper around the Firebase Admin SDK for verifying ID tokens.
@@ -107,16 +106,31 @@ class FirebaseService
         }
 
         try {
+            // Data-only on purpose. With a `notification` block the Firebase web
+            // SDK shows the push itself AND our service worker shows it again
+            // (two notifications), and the SDK's copy ignores data.link on tap.
+            // So title/body travel in data and firebase-messaging-sw.js shows it
+            // once, opening data.link. Urgency high: deliver to a sleeping phone now.
             $message = CloudMessage::new()
-                ->withNotification(FcmNotification::create($title, $body))
-                ->withData($data);
+                ->withData(array_merge($data, ['title' => $title, 'body' => $body]))
+                ->withWebPushConfig(['headers' => ['Urgency' => 'high', 'TTL' => '86400']]);
 
             $report = $messaging->sendMulticast($message, $tokens);
 
-            return $report instanceof MulticastSendReport
-                ? $report->unknownTokens()
-                : [];
+            if ($report->hasFailures()) {
+                Log::info('FCM push partly failed', [
+                    'sent' => $report->successes()->count(),
+                    'failed' => $report->failures()->count(),
+                    'error' => ($report->failures()->getItems()[0] ?? null)?->error()?->getMessage(),
+                ]);
+            }
+
+            // Unknown = app removed / token expired; invalid = malformed. Neither
+            // will ever work again, so the caller deletes them.
+            return array_values(array_unique([...$report->unknownTokens(), ...$report->invalidTokens()]));
         } catch (\Throwable $e) {
+            Log::warning('FCM push failed', ['error' => $e->getMessage()]);
+
             return [];
         }
     }

@@ -37,6 +37,10 @@ class OrderResource extends JsonResource
             'paymentLabel' => $paymentMethod?->label(),
             'tableLabel' => $this->diningTable?->label,
             'serviceAddress' => $this->service_address,
+            'deliveryPhone' => $this->delivery_phone,
+            'deliveryLocation' => $this->delivery_lat !== null && $this->delivery_lng !== null
+                ? ['lat' => (float) $this->delivery_lat, 'lng' => (float) $this->delivery_lng]
+                : null,
             'subtotal' => (float) $this->subtotal,
             'coinsUsed' => (int) $this->coins_used,
             'coinDiscount' => (float) $this->coin_discount,

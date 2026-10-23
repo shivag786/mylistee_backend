@@ -36,6 +36,7 @@ class OrderService
         private readonly StockService $stock,
         private readonly RewardService $rewards,
         private readonly PlatformFeeService $fees,
+        private readonly OrderAlertService $alerts,
     ) {}
 
     /**
@@ -60,6 +61,7 @@ class OrderService
         ?string $serviceAddress = null,
         ?string $paymentChoice = null,
         ?string $couponCode = null,
+        ?array $delivery = null,
     ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Your cart is empty.']]);
@@ -74,6 +76,7 @@ class OrderService
         }
 
         [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
+        $delivery = $serviceType === ServiceType::Delivery ? $this->resolveDelivery($customer, $delivery ?? []) : [];
         $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
 
         // No choice sent means a client from before online payment existed: cash,
@@ -81,7 +84,7 @@ class OrderService
         // message if this shop no longer takes cash.
         $paymentChoice ??= OrderPaymentService::CHOICE_COD;
 
-        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee, $paymentChoice, $couponCode): Order {
+        return DB::transaction(function () use ($business, $customer, $items, $coinsToUse, $note, $serviceType, $table, $serviceAddress, $deliveryFee, $paymentChoice, $couponCode, $delivery): Order {
             $priced = $this->priceItems($business, $items);
             $subtotal = $priced['subtotal'];
 
@@ -134,6 +137,9 @@ class OrderService
                 'stock_deducted' => $stockTaken === [] ? null : $stockTaken,
                 'note' => $note,
                 'service_address' => $serviceAddress,
+                'delivery_phone' => $delivery['phone'] ?? null,
+                'delivery_lat' => $delivery['lat'] ?? null,
+                'delivery_lng' => $delivery['lng'] ?? null,
                 'placed_at' => Carbon::now(),
             ]);
 
@@ -151,14 +157,8 @@ class OrderService
 
             // An order waiting on its online payment is not an order for the shop
             // yet -- OrderPaymentService notifies them when the money lands.
-            if ($business->owner && ! $awaitingPayment) {
-                $this->notifications->notify(
-                    $business->owner,
-                    NotificationType::OrderPlaced,
-                    "New order {$order->token} · {$order->serviceLabel()}",
-                    "₹{$order->total} · {$order->items()->count()} item(s).",
-                    ['link' => '/business/orders'],
-                );
+            if (! $awaitingPayment) {
+                $this->alerts->newOrder($order);
             }
 
             return $order->load('items');
@@ -358,6 +358,39 @@ class OrderService
         }
 
         return [$serviceType, $table, $serviceAddress ?: null];
+    }
+
+    /**
+     * The contact number and map pin for a home delivery. The number falls back
+     * to the one on the customer's account; a pin is optional (a typed address
+     * is enough) but must come as a pair.
+     *
+     * @param  array{phone?: ?string, lat?: float|string|null, lng?: float|string|null}  $delivery
+     * @return array{phone: string, lat: ?float, lng: ?float}
+     *
+     * @throws ValidationException
+     */
+    private function resolveDelivery(User $customer, array $delivery): array
+    {
+        $phone = preg_replace('/\D/', '', (string) ($delivery['phone'] ?? ''));
+        if ($phone === '') {
+            $phone = preg_replace('/\D/', '', (string) $customer->phone);
+        }
+        // Keep the last ten digits so "+91 98765 43210" and "09876543210" both fit.
+        $phone = strlen($phone) > 10 ? substr($phone, -10) : $phone;
+        if (! preg_match('/^[6-9]\d{9}$/', $phone)) {
+            throw ValidationException::withMessages(['deliveryPhone' => ['Enter a valid 10-digit mobile number for the delivery.']]);
+        }
+
+        $lat = $delivery['lat'] ?? null;
+        $lng = $delivery['lng'] ?? null;
+        $hasPin = $lat !== null && $lng !== null && $lat !== '' && $lng !== '';
+
+        return [
+            'phone' => $phone,
+            'lat' => $hasPin ? round((float) $lat, 7) : null,
+            'lng' => $hasPin ? round((float) $lng, 7) : null,
+        ];
     }
 
     /**

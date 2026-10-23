@@ -182,6 +182,12 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             ->middleware('throttle:30,1')
             ->name('loyalty.redeem');
 
+        // Loyalty step rewards as scratch cards (GPay-style).
+        Route::get('rewards/cards', [\App\Http\Controllers\Api\V1\RewardCardController::class, 'index'])->name('rewards.cards');
+        Route::post('rewards/cards/{uuid}/reveal', [\App\Http\Controllers\Api\V1\RewardCardController::class, 'reveal'])
+            ->middleware('throttle:60,1')
+            ->name('rewards.cards.reveal');
+
         // Orders (Phase 7.5) — customer places + reviews their orders
         Route::get('orders', [OrderController::class, 'index'])->name('orders.index');
         Route::post('orders', [OrderController::class, 'store'])->name('orders.store');
@@ -307,6 +313,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Order queue (Phase 7.5) — polled by the dashboard; owner drives status
             Route::get('orders', [OwnerOrderController::class, 'index'])->name('orders.index');
             Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
+            // Ring this phone with a sample new-order alert.
+            Route::post('order-alerts/test', [\App\Http\Controllers\Api\V1\Business\OrderAlertController::class, 'test'])
+                ->middleware('throttle:5,1')
+                ->name('order-alerts.test');
 
             // Service modes + delivery fee (Phase 7.6 — table/service layer)
             Route::get('service-settings', [ServiceSettingController::class, 'show'])->name('service-settings.show');
@@ -328,6 +338,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Rewards & coupons — one setup screen.
             Route::get('rewards', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'show'])->name('rewards.show');
             Route::put('rewards', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'update'])->name('rewards.update');
+            Route::get('rewards/customers', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'customers'])->name('rewards.customers');
             Route::post('coupons', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'storeCoupon'])->name('coupons.store');
             Route::put('coupons/{uuid}', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'updateCoupon'])->name('coupons.update');
             Route::delete('coupons/{uuid}', [\App\Http\Controllers\Api\V1\Business\RewardController::class, 'destroyCoupon'])->name('coupons.destroy');

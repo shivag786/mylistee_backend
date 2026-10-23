@@ -24,9 +24,9 @@ class Coupon extends Model
     public const KIND_LOYALTY = 'loyalty';
 
     protected $fillable = [
-        'business_id', 'customer_id', 'code', 'title', 'kind', 'discount_type', 'value',
+        'business_id', 'customer_id', 'code', 'title', 'kind', 'tier_at', 'discount_type', 'value',
         'max_discount', 'min_bill', 'per_customer_limit', 'usage_limit', 'used_count',
-        'starts_at', 'expires_at', 'active',
+        'starts_at', 'expires_at', 'revealed_at', 'active',
     ];
 
     protected function casts(): array
@@ -37,6 +37,7 @@ class Coupon extends Model
             'min_bill' => 'decimal:2',
             'starts_at' => 'datetime',
             'expires_at' => 'datetime',
+            'revealed_at' => 'datetime',
             'active' => 'boolean',
         ];
     }

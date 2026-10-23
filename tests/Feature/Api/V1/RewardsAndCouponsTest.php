@@ -121,6 +121,100 @@ class RewardsAndCouponsTest extends TestCase
         $this->order($customer, $business, $product, 1, $loyalty->code)->assertCreated();
     }
 
+    public function test_loyalty_steps_reward_the_3rd_5th_and_6th_order_and_repeat(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $customer = $this->customer();
+
+        $this->token($owner)->putJson('/api/v1/business/rewards', [
+            'bill_discount' => null,
+            'comeback' => null,
+            'loyalty' => ['repeat' => true, 'steps' => [
+                ['at' => 5, 'type' => 'flat', 'value' => 50],
+                ['at' => 3, 'type' => 'flat', 'value' => 20],
+                ['at' => 6, 'type' => 'percent', 'value' => 50, 'max_off' => 150],
+            ]],
+        ])->assertOk()
+            // Saved in order, whatever order they came in.
+            ->assertJsonPath('data.loyalty.steps.0.at', 3)
+            ->assertJsonPath('data.loyalty.steps.2.at', 6)
+            ->assertJsonPath('data.loyalty.repeat', true);
+
+        foreach (range(1, 9) as $n) {
+            $this->markPaid($owner, $this->order($customer, $business, $product, 1)->json('data.id'));
+        }
+
+        // 3rd, 5th, 6th — then the card starts over and the 9th is the next 3rd.
+        $this->assertSame(
+            [3, 5, 6, 3],
+            Coupon::where('customer_id', $customer->id)->where('kind', 'loyalty')->orderBy('id')->pluck('tier_at')->all(),
+        );
+
+        $card = $this->token($customer)->getJson("/api/v1/businesses/{$business->slug}")->json('data.perks.loyalty');
+        $this->assertSame(3, $card['done']);
+        $this->assertSame(2, $card['round']);
+        $this->assertSame(5, $card['next']['at']);
+        $this->assertSame(2, $card['next']['ordersLeft']);
+        $this->assertTrue($card['steps'][0]['reached']);
+        $this->assertFalse($card['steps'][1]['reached']);
+
+        // Scratch cards: hidden until opened, then the code shows.
+        $cards = $this->token($customer)->getJson('/api/v1/rewards/cards')->assertOk()->json('data');
+        $this->assertCount(4, $cards);
+        $this->assertNull($cards[0]['code']);
+        $this->token($customer)->postJson("/api/v1/rewards/cards/{$cards[0]['id']}/reveal")->assertOk()
+            ->assertJsonPath('data.revealed', true)
+            ->assertJsonPath('data.label', '₹20 off');
+
+        // Nobody else can scratch them.
+        $this->token($this->customer())->postJson("/api/v1/rewards/cards/{$cards[1]['id']}/reveal")->assertNotFound();
+
+        // The owner sees who comes back.
+        $this->token($owner)->getJson('/api/v1/business/rewards/customers')->assertOk()
+            ->assertJsonPath('data.summary.repeat', 1)
+            ->assertJsonPath('data.customers.0.orders', 9)
+            ->assertJsonPath('data.customers.0.rewardsEarned', 4)
+            ->assertJsonPath('data.customers.0.next.at', 5);
+    }
+
+    public function test_one_time_loyalty_steps_stop_after_the_last(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $customer = $this->customer();
+
+        $this->token($owner)->putJson('/api/v1/business/rewards', [
+            'bill_discount' => null,
+            'comeback' => null,
+            'loyalty' => ['repeat' => false, 'steps' => [
+                ['at' => 1, 'type' => 'flat', 'value' => 10],
+                ['at' => 2, 'type' => 'flat', 'value' => 30],
+            ]],
+        ])->assertOk();
+
+        foreach (range(1, 4) as $n) {
+            $this->markPaid($owner, $this->order($customer, $business, $product, 1)->json('data.id'));
+        }
+
+        $this->assertSame(2, Coupon::where('customer_id', $customer->id)->where('kind', 'loyalty')->count());
+        $card = $this->token($customer)->getJson("/api/v1/businesses/{$business->slug}")->json('data.perks.loyalty');
+        $this->assertTrue($card['finished']);
+        $this->assertNull($card['next']);
+    }
+
+    public function test_loyalty_steps_must_each_have_their_own_order_number(): void
+    {
+        [$owner] = $this->shop();
+
+        $this->token($owner)->putJson('/api/v1/business/rewards', [
+            'bill_discount' => null,
+            'comeback' => null,
+            'loyalty' => ['steps' => [
+                ['at' => 3, 'type' => 'flat', 'value' => 20],
+                ['at' => 3, 'type' => 'flat', 'value' => 50],
+            ]],
+        ])->assertUnprocessable();
+    }
+
     public function test_owner_coupon_codes_check_minimum_bill_and_per_customer_use(): void
     {
         [$owner, $business, $product] = $this->shop();

@@ -11,6 +11,7 @@ use App\Models\ShopRewardSetting;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -42,6 +43,11 @@ class RewardService
                 continue;
             }
             $rule = $data[$key];
+            if ($key === 'loyalty') {
+                $setting->loyalty = is_array($rule) && ($rule['enabled'] ?? true) ? $this->cleanLoyalty($rule) : null;
+
+                continue;
+            }
             $setting->{$key} = is_array($rule) && ($rule['enabled'] ?? true) && (float) ($rule['value'] ?? 0) > 0
                 ? $this->cleanRule($key, $rule)
                 : null;
@@ -67,9 +73,137 @@ class RewardService
                 'min_bill' => isset($rule['min_bill']) && (float) $rule['min_bill'] > 0 ? round((float) $rule['min_bill'], 2) : null,
                 'days' => max(1, min(90, (int) ($rule['days'] ?? 15))),
             ],
-            'loyalty' => $clean + ['every' => max(2, min(50, (int) ($rule['every'] ?? 5)))],
             default => $clean,
         };
+    }
+
+    /** Most steps a shop can set up, and the furthest order one can sit on. */
+    public const MAX_STEPS = 10;
+
+    public const MAX_STEP_AT = 100;
+
+    /**
+     * The loyalty rule as saved: `{steps: [{at, type, value, max_off}], repeat}`,
+     * steps sorted by order number, one per number, each with a real discount.
+     * Null when no step survives (the reward is then off).
+     *
+     * @param  array<string, mixed>  $rule
+     * @return array{steps: list<array<string, mixed>>, repeat: bool}|null
+     */
+    private function cleanLoyalty(array $rule): ?array
+    {
+        $steps = [];
+        foreach ($this->loyaltySteps($rule)['steps'] ?? [] as $step) {
+            $at = (int) ($step['at'] ?? 0);
+            if ($at < 1 || $at > self::MAX_STEP_AT || (float) ($step['value'] ?? 0) <= 0) {
+                continue;
+            }
+            $steps[$at] = ['at' => $at] + $this->cleanRule('loyalty_step', $step);
+        }
+        if ($steps === []) {
+            return null;
+        }
+        ksort($steps);
+
+        return [
+            'steps' => array_slice(array_values($steps), 0, self::MAX_STEPS),
+            'repeat' => (bool) ($rule['repeat'] ?? true),
+        ];
+    }
+
+    /**
+     * Read a stored loyalty rule in either shape. Rules saved before steps
+     * existed were `{every, type, value, max_off}` — one reward on every Nth
+     * order — which is exactly one step at N that repeats.
+     *
+     * @param  array<string, mixed>|null  $rule
+     * @return array{steps: list<array<string, mixed>>, repeat: bool}|null
+     */
+    public function loyaltySteps(?array $rule): ?array
+    {
+        if (! $rule) {
+            return null;
+        }
+        if (isset($rule['steps']) && is_array($rule['steps'])) {
+            $steps = array_values(array_filter($rule['steps'], 'is_array'));
+            usort($steps, fn ($a, $b) => (int) ($a['at'] ?? 0) <=> (int) ($b['at'] ?? 0));
+
+            return $steps === [] ? null : ['steps' => $steps, 'repeat' => (bool) ($rule['repeat'] ?? true)];
+        }
+        if (isset($rule['every'])) {
+            return [
+                'steps' => [[
+                    'at' => (int) $rule['every'],
+                    'type' => $rule['type'] ?? 'flat',
+                    'value' => $rule['value'] ?? 0,
+                    'max_off' => $rule['max_off'] ?? null,
+                ]],
+                'repeat' => true,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Where a customer with `$paidOrders` paid orders stands on the card. A
+     * repeating card starts over after its last step, so on a 3 · 5 · 6 card
+     * the 9th order is the 3rd of the second round.
+     *
+     * @param  array{steps: list<array<string, mixed>>, repeat: bool}  $loyalty
+     * @return array{cycle: int, position: int, round: int, finished: bool}
+     */
+    public function loyaltyPosition(array $loyalty, int $paidOrders): array
+    {
+        $cycle = $this->loyaltyCycle($loyalty);
+
+        if (! $loyalty['repeat']) {
+            return [
+                'cycle' => $cycle,
+                'position' => min($paidOrders, $cycle),
+                'round' => 1,
+                'finished' => $paidOrders >= $cycle,
+            ];
+        }
+
+        return [
+            'cycle' => $cycle,
+            'position' => $paidOrders % $cycle,
+            'round' => intdiv($paidOrders, $cycle) + 1,
+            'finished' => false,
+        ];
+    }
+
+    /** @param array{steps: list<array<string, mixed>>, repeat: bool} $loyalty */
+    private function loyaltyCycle(array $loyalty): int
+    {
+        return max(1, (int) $loyalty['steps'][count($loyalty['steps']) - 1]['at']);
+    }
+
+    /**
+     * The step a customer's `$paidOrders`-th paid order lands on, if any.
+     *
+     * @param  array{steps: list<array<string, mixed>>, repeat: bool}  $loyalty
+     * @return array<string, mixed>|null
+     */
+    private function stepForOrder(array $loyalty, int $paidOrders): ?array
+    {
+        if ($paidOrders < 1) {
+            return null;
+        }
+        $cycle = $this->loyaltyCycle($loyalty);
+        if (! $loyalty['repeat'] && $paidOrders > $cycle) {
+            return null;
+        }
+        $at = $loyalty['repeat'] ? (($paidOrders - 1) % $cycle) + 1 : $paidOrders;
+
+        foreach ($loyalty['steps'] as $step) {
+            if ((int) $step['at'] === $at) {
+                return $step;
+            }
+        }
+
+        return null;
     }
 
     /* ---------------------------------------------------------- checkout -- */
@@ -210,16 +344,24 @@ class RewardService
             $issued[] = $this->personalCoupon($order, Coupon::KIND_COMEBACK, 'Come-back reward', $comeback, (int) $comeback['days']);
         }
 
-        $loyalty = $setting->loyalty;
-        if ($loyalty && $this->paidOrderCount($business, $customer) % (int) $loyalty['every'] === 0) {
-            $issued[] = $this->personalCoupon($order, Coupon::KIND_LOYALTY, 'Loyalty reward · '.RewardRule::ordinal((int) $loyalty['every']).' order', $loyalty, 30);
+        $loyalty = $this->loyaltySteps($setting->loyalty);
+        $step = $loyalty ? $this->stepForOrder($loyalty, $this->paidOrderCount($business, $customer)) : null;
+        if ($step !== null) {
+            $issued[] = $this->personalCoupon(
+                $order,
+                Coupon::KIND_LOYALTY,
+                'Loyalty reward · '.RewardRule::ordinal((int) $step['at']).' order',
+                $step,
+                30,
+                (int) $step['at'],
+            );
         }
 
         return $issued;
     }
 
     /** @param array<string, mixed> $rule */
-    private function personalCoupon(Order $order, string $kind, string $title, array $rule, int $days): Coupon
+    private function personalCoupon(Order $order, string $kind, string $title, array $rule, int $days, ?int $tierAt = null): Coupon
     {
         $prefix = $kind === Coupon::KIND_LOYALTY ? 'LOYAL' : 'BACK';
         do {
@@ -232,6 +374,7 @@ class RewardService
             'code' => $code,
             'title' => $title,
             'kind' => $kind,
+            'tier_at' => $tierAt,
             'discount_type' => $rule['type'],
             'value' => $rule['value'],
             'max_discount' => $rule['max_off'] ?? null,
@@ -255,9 +398,7 @@ class RewardService
         $setting = $this->settingsFor($business);
         $bill = $setting->bill_discount;
         $comeback = $setting->comeback;
-        $loyalty = $setting->loyalty;
-
-        $done = $loyalty && $customer ? $this->paidOrderCount($business, $customer) % (int) $loyalty['every'] : 0;
+        $loyalty = $this->loyaltySteps($setting->loyalty);
 
         return [
             'billDiscount' => $bill ? [
@@ -269,13 +410,54 @@ class RewardService
                 'minBill' => $comeback['min_bill'] !== null ? (float) $comeback['min_bill'] : null,
                 'label' => RewardRule::label($comeback['type'], (float) $comeback['value'], $comeback['max_off'] ?? null),
             ] : null,
-            'loyalty' => $loyalty ? [
-                'every' => (int) $loyalty['every'],
-                // Paid orders towards the next reward; null for a guest.
-                'done' => $customer ? $done : null,
-                'label' => RewardRule::label($loyalty['type'], (float) $loyalty['value'], $loyalty['max_off'] ?? null),
-            ] : null,
+            'loyalty' => $loyalty ? $this->loyaltyCard($business, $customer, $loyalty) : null,
             'coupons' => $this->couponsFor($business, $customer)->map(fn (Coupon $c) => $this->couponPayload($c))->all(),
+        ];
+    }
+
+    /**
+     * The loyalty card as a customer sees it: every step with its reward, how
+     * far along they are, and the next step to reach.
+     *
+     * @param  array{steps: list<array<string, mixed>>, repeat: bool}  $loyalty
+     * @return array<string, mixed>
+     */
+    private function loyaltyCard(Business $business, ?User $customer, array $loyalty): array
+    {
+        $paid = $customer ? $this->paidOrderCount($business, $customer) : null;
+        $where = $paid !== null ? $this->loyaltyPosition($loyalty, $paid) : null;
+        $position = $where['position'] ?? 0;
+        $finished = $where['finished'] ?? false;
+
+        $steps = array_map(fn (array $step) => [
+            'at' => (int) $step['at'],
+            'label' => RewardRule::label($step['type'], (float) $step['value'], $step['max_off'] ?? null),
+            'reached' => $finished || ($where !== null && $position >= (int) $step['at']),
+        ], $loyalty['steps']);
+
+        $next = null;
+        if (! $finished) {
+            foreach ($steps as $step) {
+                if ($step['at'] > $position) {
+                    $next = $step;
+                    break;
+                }
+            }
+        }
+
+        return [
+            'steps' => $steps,
+            'repeat' => $loyalty['repeat'],
+            // Orders in one round of the card (the last step's number).
+            'every' => $this->loyaltyCycle($loyalty),
+            // Paid orders into the current round; null for a guest.
+            'done' => $where !== null ? $position : null,
+            'totalOrders' => $paid,
+            'round' => $where['round'] ?? null,
+            'finished' => $finished,
+            // The next step to reach, and how many orders until it.
+            'next' => $next ? $next + ['ordersLeft' => $next['at'] - $position] : null,
+            'label' => ($next ?? $steps[0])['label'],
         ];
     }
 
@@ -305,13 +487,167 @@ class RewardService
 
             return (float) $bill['min_bill'] > 0 ? "{$label} above ₹".RewardRule::money((float) $bill['min_bill']) : $label;
         }
-        if ($loyalty = $setting->loyalty) {
-            return 'Every '.RewardRule::ordinal((int) $loyalty['every']).' order '.RewardRule::label($loyalty['type'], (float) $loyalty['value'], $loyalty['max_off'] ?? null);
+        if ($loyalty = $this->loyaltySteps($setting->loyalty)) {
+            $steps = $loyalty['steps'];
+            if (count($steps) === 1) {
+                $step = $steps[0];
+
+                return ($loyalty['repeat'] ? 'Every ' : 'On your ').RewardRule::ordinal((int) $step['at']).' order '
+                    .RewardRule::label($step['type'], (float) $step['value'], $step['max_off'] ?? null);
+            }
+            $ats = array_map(fn ($s) => RewardRule::ordinal((int) $s['at']), $steps);
+            $last = array_pop($ats);
+
+            return 'Rewards on your '.implode(', ', $ats).' & '.$last.' order';
         }
         if ($comeback = $setting->comeback) {
             return RewardRule::label($comeback['type'], (float) $comeback['value'], $comeback['max_off'] ?? null).' on your next visit';
         }
 
         return null;
+    }
+
+    /* ------------------------------------------------------- scratch cards -- */
+
+    /**
+     * The loyalty rewards a customer has earned at every shop, newest first —
+     * shown as scratch cards, each opened once.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function scratchCards(User $customer): array
+    {
+        return Coupon::where('customer_id', $customer->id)
+            ->where('kind', Coupon::KIND_LOYALTY)
+            ->with('business:id,name,slug,logo_path')
+            ->latest('id')
+            ->limit(60)
+            ->get()
+            ->map(fn (Coupon $c) => $this->cardPayload($c))
+            ->all();
+    }
+
+    /**
+     * Scratch a card open. Opening twice is harmless and keeps the first time.
+     *
+     * @return array<string, mixed>|null null when the card is not this customer's
+     */
+    public function reveal(User $customer, string $uuid): ?array
+    {
+        $coupon = Coupon::where('customer_id', $customer->id)
+            ->where('kind', Coupon::KIND_LOYALTY)
+            ->where('uuid', $uuid)
+            ->with('business:id,name,slug,logo_path')
+            ->first();
+        if ($coupon === null) {
+            return null;
+        }
+        if ($coupon->revealed_at === null) {
+            $coupon->forceFill(['revealed_at' => Carbon::now()])->save();
+        }
+
+        return $this->cardPayload($coupon);
+    }
+
+    /** @return array<string, mixed> */
+    private function cardPayload(Coupon $coupon): array
+    {
+        $used = $coupon->used_count > 0;
+        $expired = ! $used && $coupon->expires_at !== null && $coupon->expires_at->isPast();
+        $revealed = $coupon->revealed_at !== null;
+
+        return [
+            'id' => $coupon->uuid,
+            'tierAt' => $coupon->tier_at,
+            'title' => $coupon->title,
+            // The reward stays hidden until the card is scratched.
+            'label' => $revealed ? $coupon->label() : null,
+            'code' => $revealed ? $coupon->code : null,
+            'minBill' => $coupon->min_bill !== null ? (float) $coupon->min_bill : null,
+            'revealed' => $revealed,
+            'status' => $used ? 'used' : ($expired ? 'expired' : 'active'),
+            'expiresAt' => $coupon->expires_at?->toIso8601String(),
+            'earnedAt' => $coupon->created_at?->toIso8601String(),
+            'business' => $coupon->business ? [
+                'name' => $coupon->business->name,
+                'slug' => $coupon->business->slug,
+                'logo' => $coupon->business->logo_path ? Storage::disk('public')->url($coupon->business->logo_path) : null,
+            ] : null,
+        ];
+    }
+
+    /* ---------------------------------------------------- repeat customers -- */
+
+    /**
+     * Who keeps coming back: every customer with a paid order here, how many,
+     * when they last ordered, the loyalty rewards they earned and used, and
+     * where they stand on the card. Most orders first.
+     *
+     * @return array{customers: list<array<string, mixed>>, summary: array<string, int>}
+     */
+    public function repeatCustomers(Business $business, int $limit = 200): array
+    {
+        $rows = Order::query()
+            ->where('business_id', $business->id)
+            ->whereNotNull('paid_at')
+            ->whereNotNull('customer_id')
+            ->selectRaw('customer_id, count(*) as orders, max(paid_at) as last_paid_at, sum(total) as spent')
+            ->groupBy('customer_id')
+            ->orderByDesc('orders')
+            ->orderByDesc('last_paid_at')
+            ->limit($limit)
+            ->get();
+
+        $ids = $rows->pluck('customer_id');
+        $users = User::whereIn('id', $ids)->get(['id', 'name', 'avatar_url'])->keyBy('id');
+        $earned = Coupon::where('business_id', $business->id)
+            ->where('kind', Coupon::KIND_LOYALTY)
+            ->whereIn('customer_id', $ids)
+            ->selectRaw('customer_id, count(*) as earned, sum(case when used_count > 0 then 1 else 0 end) as used')
+            ->groupBy('customer_id')
+            ->get()
+            ->keyBy('customer_id');
+
+        $loyalty = $this->loyaltySteps($this->settingsFor($business)->loyalty);
+
+        $customers = $rows->map(function ($row) use ($users, $earned, $loyalty): array {
+            $orders = (int) $row->orders;
+            $where = $loyalty ? $this->loyaltyPosition($loyalty, $orders) : null;
+            $next = null;
+            if ($loyalty && ! $where['finished']) {
+                foreach ($loyalty['steps'] as $step) {
+                    if ((int) $step['at'] > $where['position']) {
+                        $next = ['at' => (int) $step['at'], 'ordersLeft' => (int) $step['at'] - $where['position']];
+                        break;
+                    }
+                }
+            }
+            $user = $users->get($row->customer_id);
+            $rewards = $earned->get($row->customer_id);
+
+            return [
+                'name' => $user?->name ?: 'Customer',
+                'avatar' => $user?->avatar_url,
+                'orders' => $orders,
+                'spent' => round((float) $row->spent, 2),
+                'lastOrderAt' => $row->last_paid_at ? Carbon::parse($row->last_paid_at)->toIso8601String() : null,
+                'rewardsEarned' => (int) ($rewards->earned ?? 0),
+                'rewardsUsed' => (int) ($rewards->used ?? 0),
+                'position' => $where['position'] ?? null,
+                'round' => $where['round'] ?? null,
+                'finished' => $where['finished'] ?? false,
+                'next' => $next,
+            ];
+        })->all();
+
+        return [
+            'customers' => $customers,
+            'summary' => [
+                'customers' => count($customers),
+                'repeat' => count(array_filter($customers, fn ($c) => $c['orders'] > 1)),
+                'rewardsEarned' => array_sum(array_column($customers, 'rewardsEarned')),
+                'rewardsUsed' => array_sum(array_column($customers, 'rewardsUsed')),
+            ],
+        ];
     }
 }

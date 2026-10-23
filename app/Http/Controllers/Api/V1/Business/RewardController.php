@@ -36,7 +36,8 @@ class RewardController extends Controller
         return ApiResponse::success([
             'billDiscount' => $setting->bill_discount,
             'comeback' => $setting->comeback,
-            'loyalty' => $setting->loyalty,
+            // Always the steps shape, whatever the row was saved as.
+            'loyalty' => $this->rewards->loyaltySteps($setting->loyalty),
             'coupons' => Coupon::where('business_id', $business->id)
                 ->whereNull('customer_id')
                 ->latest('id')
@@ -54,6 +55,13 @@ class RewardController extends Controller
     /** PUT /business/rewards */
     public function update(Request $request): JsonResponse
     {
+        // A client from before loyalty steps sends one `{every, type, value}`
+        // rule; that is a single repeating step.
+        $loyalty = $request->input('loyalty');
+        if (is_array($loyalty) && ! isset($loyalty['steps']) && isset($loyalty['every'])) {
+            $request->merge(['loyalty' => $this->rewards->loyaltySteps($loyalty)]);
+        }
+
         $rule = fn (string $key) => [
             $key => ['present', 'nullable', 'array'],
             "{$key}.type" => ['required_with:'.$key, Rule::in(['percent', 'flat'])],
@@ -65,11 +73,23 @@ class RewardController extends Controller
             ['bill_discount.min_bill' => ['required_with:bill_discount', 'numeric', 'min:0', 'max:1000000']],
             $rule('comeback'),
             ['comeback.min_bill' => ['nullable', 'numeric', 'min:0'], 'comeback.days' => ['required_with:comeback', 'integer', 'min:1', 'max:90']],
-            $rule('loyalty'),
-            ['loyalty.every' => ['required_with:loyalty', 'integer', 'min:2', 'max:50']],
-        ));
-        foreach (['bill_discount', 'comeback', 'loyalty'] as $key) {
-            if (($data[$key]['type'] ?? null) === 'percent' && (float) $data[$key]['value'] > 90) {
+            // Loyalty is a card of steps — a reward on the 3rd, 5th, 6th… order.
+            [
+                'loyalty' => ['present', 'nullable', 'array'],
+                'loyalty.repeat' => ['nullable', 'boolean'],
+                'loyalty.steps' => ['required_with:loyalty', 'array', 'min:1', 'max:'.RewardService::MAX_STEPS],
+                'loyalty.steps.*.at' => ['required', 'integer', 'min:1', 'max:'.RewardService::MAX_STEP_AT, 'distinct'],
+                'loyalty.steps.*.type' => ['required', Rule::in(['percent', 'flat'])],
+                'loyalty.steps.*.value' => ['required', 'numeric', 'min:1', 'max:100000'],
+                'loyalty.steps.*.max_off' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+            ],
+        ), [
+            'loyalty.steps.*.at.distinct' => 'Each loyalty step needs its own order number.',
+            'loyalty.steps.*.value.min' => 'Give every loyalty step a reward.',
+        ]);
+        $percents = [$data['bill_discount'] ?? null, $data['comeback'] ?? null, ...($data['loyalty']['steps'] ?? [])];
+        foreach ($percents as $rule) {
+            if (($rule['type'] ?? null) === 'percent' && (float) $rule['value'] > 90) {
                 return ApiResponse::error('Keep a percentage discount at 90% or less.', status: 422);
             }
         }
@@ -77,6 +97,12 @@ class RewardController extends Controller
         $this->rewards->update($this->business($request), $data);
 
         return $this->show($request);
+    }
+
+    /** GET /business/rewards/customers — who comes back, and how far along the card they are. */
+    public function customers(Request $request): JsonResponse
+    {
+        return ApiResponse::success($this->rewards->repeatCustomers($this->business($request)), 'Repeat customers.');
     }
 
     /** POST /business/coupons */

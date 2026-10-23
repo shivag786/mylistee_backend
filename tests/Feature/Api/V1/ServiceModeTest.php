@@ -126,18 +126,57 @@ class ServiceModeTest extends TestCase
             'serviceType' => 'delivery',
         ])->assertStatus(422);
 
-        // With an address, the fee is folded into the total.
+        // An address without a number to call is rejected too.
+        $this->token($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'serviceType' => 'delivery',
+            'serviceAddress' => '12 MG Road',
+        ])->assertStatus(422)->assertJsonValidationErrors('deliveryPhone');
+
+        // With an address, a number and a pin, the fee is folded into the total.
+        $this->token($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+            'serviceType' => 'delivery',
+            'serviceAddress' => '12 MG Road',
+            'deliveryPhone' => '+91 98765 43210',
+            'deliveryLat' => 12.9715987,
+            'deliveryLng' => 77.5945627,
+        ])->assertCreated()
+            ->assertJsonPath('data.serviceType', 'delivery')
+            ->assertJsonPath('data.subtotal', 100)
+            ->assertJsonPath('data.deliveryFee', 40)
+            ->assertJsonPath('data.total', 140)
+            ->assertJsonPath('data.serviceAddress', '12 MG Road')
+            ->assertJsonPath('data.deliveryPhone', '9876543210')
+            ->assertJsonPath('data.deliveryLocation.lat', 12.9715987);
+    }
+
+    public function test_delivery_falls_back_to_the_account_number_and_free_delivery_costs_nothing(): void
+    {
+        [$owner, $business] = $this->shop();
+        $customer = $this->customer();
+        $customer->forceFill(['phone' => '9123456780'])->save();
+        $product = Product::factory()->create(['business_id' => $business->id, 'selling_price' => 100]);
+
+        // Delivery on, no charge entered.
+        $this->token($owner)->putJson('/api/v1/business/service-settings', [
+            'modes' => ['pickup', 'delivery'],
+            'defaultMode' => 'pickup',
+            'deliveryFee' => 0,
+        ])->assertOk();
+
         $this->token($customer)->postJson('/api/v1/orders', [
             'business' => $business->slug,
             'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
             'serviceType' => 'delivery',
             'serviceAddress' => '12 MG Road',
         ])->assertCreated()
-            ->assertJsonPath('data.serviceType', 'delivery')
-            ->assertJsonPath('data.subtotal', 100)
-            ->assertJsonPath('data.deliveryFee', 40)
-            ->assertJsonPath('data.total', 140)
-            ->assertJsonPath('data.serviceAddress', '12 MG Road');
+            ->assertJsonPath('data.deliveryFee', 0)
+            ->assertJsonPath('data.total', 100)
+            ->assertJsonPath('data.deliveryPhone', '9123456780')
+            ->assertJsonPath('data.deliveryLocation', null);
     }
 
     public function test_a_mode_the_shop_does_not_offer_is_rejected(): void

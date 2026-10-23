@@ -647,22 +647,14 @@ class OrderPaymentService
             'cancelled_at' => null,
         ]);
 
-        $order->loadMissing('business.owner');
+        $due = $order->amountDue();
+        $paidLine = $due > 0
+            ? "₹{$order->online_amount} paid online · ₹{$due} to collect."
+            : "₹{$order->online_amount} paid online in full.";
 
-        if ($order->business?->owner) {
-            $due = $order->amountDue();
-            $paidLine = $due > 0
-                ? "₹{$order->online_amount} paid online · ₹{$due} to collect."
-                : "₹{$order->online_amount} paid online in full.";
-
-            $this->notifications->notify(
-                $order->business->owner,
-                NotificationType::OrderPlaced,
-                "New order {$order->token} · {$order->serviceLabel()}",
-                $paidLine,
-                ['link' => '/business/orders'],
-            );
-        }
+        // Resolved here rather than injected: OrderService already takes this
+        // class, and the alert service is the only piece of it needed.
+        app(OrderAlertService::class)->newOrder($order, $paidLine);
     }
 
     /**

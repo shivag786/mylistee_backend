@@ -96,6 +96,10 @@ class OrderController extends Controller
             'serviceType' => ['nullable', Rule::in(ServiceType::values())],
             'table' => ['nullable', 'string'],
             'serviceAddress' => ['nullable', 'string', 'max:500'],
+            // Home delivery: who to call, and the map pin when the customer set one.
+            'deliveryPhone' => ['nullable', 'string', 'max:20'],
+            'deliveryLat' => ['nullable', 'numeric', 'between:-90,90', 'required_with:deliveryLng'],
+            'deliveryLng' => ['nullable', 'numeric', 'between:-180,180', 'required_with:deliveryLat'],
             // Optional: a client that predates online payment sends none, which
             // means cash. See OrderService::place().
             'paymentChoice' => ['nullable', Rule::in([OrderPaymentService::CHOICE_ONLINE, OrderPaymentService::CHOICE_COD])],
@@ -120,6 +124,11 @@ class OrderController extends Controller
             $validated['serviceAddress'] ?? null,
             $validated['paymentChoice'] ?? null,
             $validated['couponCode'] ?? null,
+            [
+                'phone' => $validated['deliveryPhone'] ?? null,
+                'lat' => $validated['deliveryLat'] ?? null,
+                'lng' => $validated['deliveryLng'] ?? null,
+            ],
         );
 
         return ApiResponse::success(

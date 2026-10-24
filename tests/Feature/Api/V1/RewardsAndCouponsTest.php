@@ -74,6 +74,7 @@ class RewardsAndCouponsTest extends TestCase
             'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
         ])->assertOk()
             ->assertJsonPath('data.billDiscount', 0)
+            ->assertJsonPath('data.acceptingOrders', true)
             ->assertJsonPath('data.billNudge.needed', 150)
             ->assertJsonPath('data.billNudge.label', '₹50 off');
 
@@ -84,6 +85,25 @@ class RewardsAndCouponsTest extends TestCase
         $order = Order::latest('id')->first();
         $this->assertSame('9.00', $order->platform_fee);
         $this->assertSame('441.00', $order->vendor_earning);
+    }
+
+    public function test_a_coupon_replaces_the_bill_discount_only_when_it_saves_more(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $this->setUpRewards($owner);
+        $customer = $this->customer();
+        $small = Coupon::create(['business_id' => $business->id, 'kind' => 'code', 'code' => 'SMALL30', 'title' => '₹30 off', 'discount_type' => 'flat', 'value' => 30, 'active' => true]);
+        $big = Coupon::create(['business_id' => $business->id, 'kind' => 'code', 'code' => 'BIG80', 'title' => '₹80 off', 'discount_type' => 'flat', 'value' => 80, 'active' => true]);
+
+        // ₹500 earns ₹50 off; a ₹30 coupon would only lose the customer money.
+        $this->order($customer, $business, $product, 2, $small->code)->assertUnprocessable()
+            ->assertJsonValidationErrors('couponCode');
+
+        // ₹80 beats ₹50: the coupon applies and the bill discount steps aside.
+        $this->order($customer, $business, $product, 2, $big->code)->assertCreated()
+            ->assertJsonPath('data.billDiscount', 0)
+            ->assertJsonPath('data.couponDiscount', 80)
+            ->assertJsonPath('data.total', 420);
     }
 
     public function test_paid_orders_earn_comeback_and_every_third_a_loyalty_coupon(): void

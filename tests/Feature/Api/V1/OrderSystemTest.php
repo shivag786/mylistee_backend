@@ -127,6 +127,28 @@ class OrderSystemTest extends TestCase
         $this->assertDatabaseHas('notifications', ['user_id' => $customer->id, 'type' => 'order_update']);
     }
 
+    public function test_customer_is_told_when_the_shop_accepts_and_completes(): void
+    {
+        [$owner, $business] = $this->shop();
+        $customer = $this->customer();
+        $product = Product::factory()->create(['business_id' => $business->id, 'selling_price' => 100]);
+
+        $orderId = $this->token($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 1]],
+        ])->json('data.id');
+
+        foreach (['confirmed', 'paid', 'completed'] as $status) {
+            $this->token($owner)->patchJson("/api/v1/business/orders/{$orderId}/status", ['status' => $status])
+                ->assertOk()->assertJsonPath('data.status', $status);
+        }
+
+        $titles = $customer->appNotifications()->pluck('title')->all();
+        $this->assertContains('Order accepted 👨‍🍳', $titles);
+        $this->assertContains('Payment received ✅', $titles);
+        $this->assertContains('Order completed ✅', $titles);
+    }
+
     public function test_invalid_transition_is_rejected(): void
     {
         [$owner, $business] = $this->shop();

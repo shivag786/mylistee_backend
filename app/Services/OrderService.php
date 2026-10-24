@@ -197,6 +197,8 @@ class OrderService
             'next' => ['comeback' => $perks['comeback'], 'loyalty' => $perks['loyalty']],
             'subtotal' => $subtotal,
             'billDiscount' => $discounts['billDiscount'],
+            // The bill discount this cart would get without a coupon (a coupon replaces it).
+            'billDiscountAvailable' => $this->rewards->billDiscount($business, $subtotal),
             'billNudge' => $this->rewards->billNudge($business, $subtotal),
             'coupon' => $discounts['coupon'] ? $this->rewards->couponPayload($discounts['coupon']) : null,
             'couponDiscount' => $discounts['couponDiscount'],
@@ -204,13 +206,16 @@ class OrderService
             'savings' => $savings,
             'deliveryFee' => $deliveryFee,
             'comboCoinCap' => $priced['comboCoinCap'],
+            // Closed or paused: the cart says so instead of letting checkout fail.
+            'acceptingOrders' => $business->acceptsOrders(),
             // Before coins; the cart takes any coins off this.
             'total' => round($subtotal - $savings + $deliveryFee, 2),
             'coupons' => $this->rewards->couponsFor($business, $customer)
                 ->map(fn ($c) => $this->rewards->couponPayload($c) + [
                     'minBillMet' => $c->min_bill === null || $subtotal >= (float) $c->min_bill,
+                    // A coupon replaces the bill discount (one offer per order).
                     'saves' => $c->min_bill === null || $subtotal >= (float) $c->min_bill
-                        ? $c->discountFor(max(0.0, $subtotal - $discounts['billDiscount']))
+                        ? $c->discountFor($subtotal)
                         : 0.0,
                 ])->all(),
         ];
@@ -227,9 +232,17 @@ class OrderService
         $coupon = null;
         $couponDiscount = 0.0;
 
+        // One offer per order: a coupon replaces the shop's bill discount, so it
+        // is only worth applying when it saves more.
         if ($couponCode !== null && trim($couponCode) !== '') {
             $coupon = $this->rewards->couponForCheckout($business, $customer, $couponCode, $subtotal);
-            $couponDiscount = $coupon->discountFor(max(0.0, $subtotal - $billDiscount));
+            $couponDiscount = $coupon->discountFor($subtotal);
+            if ($billDiscount > 0 && $couponDiscount <= $billDiscount) {
+                throw ValidationException::withMessages(['couponCode' => [
+                    "Your ₹{$billDiscount} bill discount already saves more. Only one offer or coupon works per order.",
+                ]]);
+            }
+            $billDiscount = 0.0;
         }
 
         return ['billDiscount' => $billDiscount, 'coupon' => $coupon, 'couponDiscount' => $couponDiscount];
@@ -415,15 +428,46 @@ class OrderService
 
         return DB::transaction(function () use ($order, $to, $actor, $paymentMethod): Order {
             match ($to) {
-                OrderStatus::Confirmed => $order->update(['status' => $to, 'confirmed_at' => Carbon::now()]),
+                OrderStatus::Confirmed => $this->markConfirmed($order),
                 OrderStatus::Paid => $this->markPaid($order, $actor, $paymentMethod),
-                OrderStatus::Completed => $order->update(['status' => $to, 'completed_at' => Carbon::now()]),
+                OrderStatus::Completed => $this->markCompleted($order),
                 OrderStatus::Cancelled => $this->markCancelled($order),
                 default => null,
             };
 
             return $order->fresh('items');
         });
+    }
+
+    /** The shop took the order. Tell the customer, who may be watching the page. */
+    private function markConfirmed(Order $order): void
+    {
+        $order->update(['status' => OrderStatus::Confirmed, 'confirmed_at' => Carbon::now()]);
+
+        if ($order->customer) {
+            $this->notifications->notify(
+                $order->customer,
+                NotificationType::OrderUpdate,
+                'Order accepted 👨‍🍳',
+                "{$order->business->name} accepted your order {$order->token} and is preparing it.",
+                ['link' => '/orders'],
+            );
+        }
+    }
+
+    private function markCompleted(Order $order): void
+    {
+        $order->update(['status' => OrderStatus::Completed, 'completed_at' => Carbon::now()]);
+
+        if ($order->customer) {
+            $this->notifications->notify(
+                $order->customer,
+                NotificationType::OrderUpdate,
+                'Order completed ✅',
+                "Your order {$order->token} at {$order->business->name} is complete. Thank you!",
+                ['link' => '/orders'],
+            );
+        }
     }
 
     private function markPaid(Order $order, User $actor, ?PaymentMethod $paymentMethod = null): void

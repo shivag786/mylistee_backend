@@ -66,6 +66,42 @@ class ProductOptionsTest extends TestCase
             ->assertJsonPath('data.discount', null);
     }
 
+    public function test_sizes_carry_a_type_and_quantity_through_to_the_order(): void
+    {
+        [$owner, $business] = $this->shop();
+        $customer = User::factory()->create(['role' => UserRole::Customer, 'status' => UserStatus::Active]);
+
+        // Veg momo: Steam or Fried, each in Half / Full with a piece count — or a type alone.
+        $res = $this->token($owner)->post('/api/v1/business/products', [
+            'name' => 'Veg Momo',
+            'selling_price' => 50,
+            'variants' => json_encode([
+                ['type' => 'Steam', 'name' => 'Half', 'qty' => '5 pcs', 'price' => 50],
+                ['type' => 'Fried', 'name' => 'Full', 'qty' => '10 pcs', 'price' => 110],
+                ['type' => 'Kurkure', 'price' => 90],
+            ]),
+        ])->assertCreated()
+            ->assertJsonPath('data.variants.0.type', 'Steam')
+            ->assertJsonPath('data.variants.0.qty', '5 pcs')
+            ->assertJsonPath('data.variants.1.label', 'Fried · Full · 10 pcs')
+            ->assertJsonPath('data.variants.2.label', 'Kurkure');
+
+        // A row needs a size or a type.
+        $this->token($owner)->post('/api/v1/business/products', [
+            'name' => 'Momo',
+            'selling_price' => 50,
+            'variants' => json_encode([['qty' => '5 pcs', 'price' => 50]]),
+        ])->assertUnprocessable();
+
+        $product = Product::where('uuid', $res->json('data.id'))->sole();
+        $this->token($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'variant' => $res->json('data.variants.1.id')]],
+        ])->assertCreated()
+            ->assertJsonPath('data.items.0.name', 'Veg Momo (Fried · Full · 10 pcs)')
+            ->assertJsonPath('data.items.0.unitPrice', 110);
+    }
+
     public function test_a_flat_discount_comes_off_every_size(): void
     {
         $product = Product::factory()->make(['options' => ['discount' => ['type' => 'flat', 'value' => 30]]]);

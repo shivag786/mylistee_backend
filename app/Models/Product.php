@@ -146,6 +146,21 @@ class Product extends Model
     }
 
     /**
+     * How a size reads to people: "Fried · Half · 6 pcs" (type, size and
+     * quantity, whichever the owner filled in).
+     *
+     * @param  array<string, mixed>  $variant
+     */
+    public static function variantLabel(array $variant): string
+    {
+        return implode(' · ', array_filter([
+            $variant['type'] ?? null,
+            $variant['name'] ?? null,
+            $variant['qty'] ?? null,
+        ], fn ($v) => filled($v)));
+    }
+
+    /**
      * Extras the customer may add any of ("Extra cheese"), each priced on top.
      *
      * @return list<array{id: string, name: string, price: float}>

@@ -70,7 +70,10 @@ class ProductResource extends JsonResource
             // running promotion comes off at checkout, as for the plain price.
             'variants' => array_map(fn (array $v): array => [
                 'id' => $v['id'],
-                'name' => $v['name'],
+                'type' => $v['type'] ?? null,
+                'name' => $v['name'] ?? '',
+                'qty' => $v['qty'] ?? null,
+                'label' => Product::variantLabel($v),
                 'price' => (float) $v['price'],
                 'sellingPrice' => $this->applyDiscount((float) $v['price']),
             ], $this->variants()),

@@ -167,11 +167,14 @@ class ProductService
             if (! array_key_exists($key, $data)) {
                 continue;
             }
-            $options[$key] = array_values(array_map(fn (array $row): array => [
+            $options[$key] = array_values(array_map(fn (array $row): array => array_filter([
                 'id' => filled($row['id'] ?? null) ? (string) $row['id'] : Str::lower(Str::random(8)),
-                'name' => trim((string) $row['name']),
+                // Sizes may also carry a type ("Steam" / "Fried") and a quantity ("6 pcs").
+                'type' => $key === 'variants' && filled($row['type'] ?? null) ? trim((string) $row['type']) : null,
+                'name' => trim((string) ($row['name'] ?? '')),
+                'qty' => $key === 'variants' && filled($row['qty'] ?? null) ? trim((string) $row['qty']) : null,
                 'price' => round((float) $row['price'], 2),
-            ], $data[$key] ?? []));
+            ], fn ($v) => $v !== null), $data[$key] ?? []));
         }
 
         if (array_key_exists('discount', $data)) {

@@ -13,6 +13,7 @@ use App\Models\BusinessTable;
 use App\Models\Combo;
 use App\Models\Coupon;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\Reward;
 use App\Models\User;
 use Illuminate\Support\Carbon;
@@ -309,13 +310,14 @@ class OrderService
                 }
                 // Snapshot the picks by name, as the line's name and price are.
                 $variant = collect($product->variants())->firstWhere('id', $variantId);
+                $variantLabel = $variant ? Product::variantLabel($variant) : null;
                 $addons = collect($product->addons())->whereIn('id', $addonIds)->pluck('name')->values()->all();
                 $lines[] = [
                     'product_id' => $product->id,
                     'item_type' => 'product',
-                    'name' => $variant ? "{$product->name} ({$variant['name']})" : $product->name,
+                    'name' => $variantLabel ? "{$product->name} ({$variantLabel})" : $product->name,
                     'options' => $variant || $addons !== []
-                        ? ['variant' => $variant['name'] ?? null, 'addons' => $addons]
+                        ? ['variant' => $variantLabel, 'addons' => $addons]
                         : null,
                     'unit_price' => $unit,
                     'quantity' => $quantity,

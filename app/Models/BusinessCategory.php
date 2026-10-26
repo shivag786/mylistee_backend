@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BusinessType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -24,6 +25,7 @@ class BusinessCategory extends Model
         'status',
         'show_on_homepage',
         'show_in_search',
+        'business_type',
     ];
 
     protected function casts(): array
@@ -31,6 +33,7 @@ class BusinessCategory extends Model
         return [
             'show_on_homepage' => 'boolean',
             'show_in_search' => 'boolean',
+            'business_type' => BusinessType::class,
         ];
     }
 

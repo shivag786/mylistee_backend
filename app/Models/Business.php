@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\BusinessStatus;
+use App\Enums\BusinessType;
 use App\Enums\ServiceType;
 use Database\Factories\BusinessFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -41,6 +42,8 @@ class Business extends Model
         'whatsapp',
         'gst',
         'status',
+        'setup_completed_at',
+        'kitchen_enabled',
         'verified',
         'featured',
         'created_by',
@@ -77,6 +80,8 @@ class Business extends Model
             'personal_link_reminded_on' => 'date',
             'closed_until' => 'datetime',
             'orders_paused' => 'boolean',
+            'setup_completed_at' => 'datetime',
+            'kitchen_enabled' => 'boolean',
         ];
     }
 
@@ -396,6 +401,36 @@ class Business extends Model
     public function acceptsOrders(): bool
     {
         return ! $this->isTemporarilyClosed() && ! $this->orders_paused;
+    }
+
+    /**
+     * What a shop started from the vendor app still needs before it can go
+     * live. Hours are optional, as in the web registration.
+     *
+     * @return list<string>
+     */
+    public function setupMissing(): array
+    {
+        return array_keys(array_filter([
+            'category' => $this->category_id === null,
+            'address' => blank($this->address),
+            'city' => blank($this->city),
+        ]));
+    }
+
+    /** The kind of shop, from its category (food when it has none). */
+    public function businessType(): BusinessType
+    {
+        return $this->category?->business_type ?? BusinessType::Food;
+    }
+
+    /**
+     * Whether accepted orders go to the kitchen screen: the owner's switch,
+     * else what the shop type suggests.
+     */
+    public function usesKitchen(): bool
+    {
+        return $this->kitchen_enabled ?? $this->businessType()->usesKitchen();
     }
 
     public function isOpenNow(): bool

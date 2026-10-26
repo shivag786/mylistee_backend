@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api\V1\Business;
 
+use App\Enums\KitchenStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
+use App\Enums\ServiceType;
 use App\Http\Controllers\Api\V1\Business\Concerns\ResolvesBusiness;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
@@ -50,6 +52,69 @@ class OrderController extends Controller
         }
 
         return ApiResponse::success(OrderResource::collection($query->limit(100)->get()), 'Orders retrieved.');
+    }
+
+    /**
+     * POST /business/orders — a walk-in order taken at the counter. Starts
+     * accepted (and in the kitchen); `paid` records the payment straight away.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $business = $this->business($request);
+
+        $validated = $request->validate([
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.type' => ['required', Rule::in(['product', 'combo'])],
+            'items.*.id' => ['required', 'string'],
+            'items.*.quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'items.*.variant' => ['nullable', 'string', 'max:16'],
+            'items.*.addons' => ['nullable', 'array', 'max:20'],
+            'items.*.addons.*' => ['string', 'max:16'],
+            'serviceType' => ['nullable', Rule::in(ServiceType::values())],
+            'table' => ['nullable', 'string'],
+            'serviceAddress' => ['nullable', 'string', 'max:500'],
+            'note' => ['nullable', 'string', 'max:300'],
+            'customerName' => ['nullable', 'string', 'max:80'],
+            'paid' => ['nullable', Rule::in(PaymentMethod::values())],
+        ]);
+
+        $order = $this->orders->placeAtCounter(
+            $business,
+            $request->user(),
+            $validated['items'],
+            isset($validated['serviceType']) ? ServiceType::from($validated['serviceType']) : null,
+            $validated['table'] ?? null,
+            $validated['note'] ?? null,
+            $validated['customerName'] ?? null,
+            $validated['serviceAddress'] ?? null,
+            isset($validated['paid']) ? PaymentMethod::from($validated['paid']) : null,
+        );
+
+        return ApiResponse::success(
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            "Order #{$order->token} created.",
+            status: 201,
+        );
+    }
+
+    /** PATCH /business/orders/{uuid}/kitchen — queued / preparing / ready. */
+    public function kitchen(Request $request, string $uuid): JsonResponse
+    {
+        $order = $this->business($request)->orders()->where('uuid', $uuid)->first();
+        if ($order === null) {
+            return ApiResponse::error('Order not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'status' => ['required', Rule::enum(KitchenStatus::class)],
+        ]);
+
+        $order = $this->orders->setKitchenStatus($order, KitchenStatus::from($validated['status']));
+
+        return ApiResponse::success(
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            $order->kitchen_status === KitchenStatus::Ready ? "Order #{$order->token} is ready." : 'Order updated.',
+        );
     }
 
     /** PATCH /business/orders/{uuid}/status */

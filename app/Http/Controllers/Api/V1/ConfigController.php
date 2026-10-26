@@ -45,6 +45,8 @@ class ConfigController extends Controller
             // Admin-set colours and fonts, applied app-wide on every device, plus
             // whether shop menu cards are tinted with each dish's colours.
             'theme' => $this->settings->theme(),
+            // The Listee Business phone app's own look (admin → Settings → Business app).
+            'vendorApp' => app(\App\Services\VendorAppThemeService::class)->get(),
             // Admin-arranged home page sections; null = the built-in order.
             'homeLayout' => $this->settings->get('homeLayout'),
             // Whether a live payment gateway is wired up. Only a boolean — no key

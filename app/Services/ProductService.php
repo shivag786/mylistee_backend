@@ -27,6 +27,14 @@ class ProductService
      */
     public function create(Business $business, array $data, ?UploadedFile $image, User $actor): Product
     {
+        // The plan's menu size (null = unlimited).
+        $limit = $business->currentPlan()?->max_products;
+        if ($limit !== null && $business->products()->count() >= $limit) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'name' => ["Your plan allows {$limit} products. Upgrade to add more."],
+            ]);
+        }
+
         $category = $this->categories->resolve(
             $business,
             $data['product_category_id'] ?? null,

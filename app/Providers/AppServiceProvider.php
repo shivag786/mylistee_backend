@@ -14,7 +14,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // One plan-access picture per request (it is read many times while
+        // building a shop page or pricing an order).
+        $this->app->scoped(\App\Services\PlanAccessService::class);
     }
 
     /**
@@ -32,5 +34,12 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip());
         });
+
+        // The plan-access picture belongs to one request; a long-lived worker
+        // (or the test client) must not carry it into the next.
+        \Illuminate\Support\Facades\Event::listen(
+            \Illuminate\Foundation\Http\Events\RequestHandled::class,
+            fn () => $this->app->forgetScopedInstances(),
+        );
     }
 }

@@ -97,6 +97,7 @@ class CategoryService
                 'slug' => $data['slug'] ?? null,
                 'sort_order' => $data['sort_order'] ?? null,
                 'status' => $data['status'] ?? null,
+                'business_type' => $data['business_type'] ?? null,
             ],
             fn ($value) => $value !== null,
         );

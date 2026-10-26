@@ -28,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Security response headers on every API response (Milestone 16).
         $middleware->api(append: [
             \App\Http\Middleware\SecurityHeaders::class,
+            // Owner sections a shop's plan does not include refuse changes.
+            \App\Http\Middleware\EnforcePlanModules::class,
         ]);
 
         // API-only backend: never redirect an unauthenticated guest to a web

@@ -29,7 +29,10 @@ use Illuminate\Support\Facades\DB;
  */
 class SubscriptionService
 {
-    public function __construct(private readonly PlanLimitService $limits) {}
+    public function __construct(
+        private readonly PlanLimitService $limits,
+        private readonly PlanAccessService $access,
+    ) {}
 
     /**
      * The canonical current-subscription payload for a business — used by both
@@ -60,10 +63,20 @@ class SubscriptionService
      *                                 upgrade granted while no gateway is
      *                                 configured (local/demo), which is recorded
      *                                 on the invoice as `simulated`.
+     * @param  bool  $intro  This period is the plan's first-time offer: its price
+     *                       and days. A paid checkout carries it on the payment.
      */
-    public function subscribe(Business $business, Plan $plan, ?User $actor = null, ?Payment $payment = null): ?Subscription
+    public function subscribe(Business $business, Plan $plan, ?User $actor = null, ?Payment $payment = null, bool $intro = false): ?Subscription
     {
-        return DB::transaction(function () use ($business, $plan, $actor, $payment): ?Subscription {
+        $intro = $intro || (bool) ($payment?->meta['intro'] ?? false);
+
+        return DB::transaction(function () use ($business, $plan, $actor, $payment, $intro): ?Subscription {
+            // Renewing the same plan early adds on to the days still left.
+            $current = $business->activeSubscription();
+            $carryFrom = $current !== null && $current->plan_id === $plan->id && $current->ends_at?->isFuture()
+                ? $current->ends_at->copy()
+                : null;
+
             // End any current active subscription.
             $business->subscriptions()->active()->update([
                 'status' => SubscriptionStatus::Cancelled->value,
@@ -71,7 +84,7 @@ class SubscriptionService
                 'ends_at' => now(),
             ]);
 
-            $business->forgetPlanCache();
+            $this->access->forget($business);
 
             // On a downgrade the new plan may allow fewer active combos/promotions
             // than are currently live — deactivate the excess (newest kept), never
@@ -83,17 +96,23 @@ class SubscriptionService
             }
 
             $startsAt = Carbon::now();
-            $endsAt = match ($plan->interval) {
-                'quarter' => $startsAt->copy()->addMonths(3),
-                'year' => $startsAt->copy()->addYear(),
+            $from = $carryFrom ?? $startsAt->copy();
+            // The admin's days win over the interval; the intro offer has its own.
+            $days = $intro ? $plan->intro_days : $plan->duration_days;
+            $endsAt = $days !== null ? $from->copy()->addDays($days) : match ($plan->interval) {
+                'quarter' => $from->copy()->addMonths(3),
+                'year' => $from->copy()->addYear(),
                 'lifetime' => null,
-                default => $startsAt->copy()->addMonth(),
+                default => $from->copy()->addMonth(),
             };
+            $price = $payment !== null
+                ? (float) $payment->amount
+                : (float) ($intro && $plan->intro_price !== null ? $plan->intro_price : $plan->price);
 
             $subscription = $business->subscriptions()->create([
                 'plan_id' => $plan->id,
                 'status' => SubscriptionStatus::Active,
-                'price' => $plan->price,
+                'price' => $price,
                 'currency' => $plan->currency,
                 'interval' => $plan->interval,
                 'starts_at' => $startsAt,
@@ -102,7 +121,7 @@ class SubscriptionService
                 'created_by' => $actor?->id,
             ]);
 
-            $invoice = $this->recordInvoice($business, $subscription, $plan, $startsAt, $endsAt, $payment);
+            $invoice = $this->recordInvoice($business, $subscription, $plan, $startsAt, $endsAt, $payment, $intro);
 
             // Close the loop so the payment row points at what it bought — this is
             // what a refund later reverses.
@@ -111,7 +130,7 @@ class SubscriptionService
                 'subscription_id' => $subscription->id,
             ])->save();
 
-            $business->forgetPlanCache();
+            $this->access->forget($business);
 
             return $subscription->load('plan');
         });
@@ -161,6 +180,10 @@ class SubscriptionService
                 'used' => $business->gallery()->count(),
                 'limit' => $plan?->max_gallery_images,
             ],
+            'products' => [
+                'used' => $business->products()->count(),
+                'limit' => $plan?->max_products,
+            ],
             'qrCodes' => [
                 'used' => $business->qrCode()->count(),
                 'limit' => $plan?->max_qr_codes,
@@ -207,10 +230,11 @@ class SubscriptionService
         Carbon $periodStart,
         ?Carbon $periodEnd,
         ?Payment $payment = null,
+        bool $intro = false,
     ): Invoice {
         // The gateway trail lives on the invoice too: a support agent reading the
         // owner's billing history can jump straight to the Razorpay dashboard.
-        $meta = ['interval' => $plan->interval];
+        $meta = ['interval' => $plan->interval] + ($intro ? ['intro' => true] : []);
         if ($payment !== null) {
             $meta += [
                 'gateway' => $payment->gateway,
@@ -228,7 +252,7 @@ class SubscriptionService
             'number' => $this->nextInvoiceNumber(),
             'subscription_id' => $subscription->id,
             'plan_name' => $plan->name,
-            'amount' => $payment !== null ? $payment->amount : $plan->price,
+            'amount' => $payment !== null ? $payment->amount : $subscription->price,
             'currency' => $plan->currency,
             'status' => InvoiceStatus::Paid,
             'period_start' => $periodStart->toDateString(),

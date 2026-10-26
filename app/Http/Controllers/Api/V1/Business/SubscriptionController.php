@@ -8,6 +8,7 @@ use App\Http\Resources\InvoiceResource;
 use App\Http\Resources\PlanResource;
 use App\Http\Resources\SubscriptionResource;
 use App\Models\Plan;
+use App\Services\PlanAccessService;
 use App\Services\RazorpayService;
 use App\Services\SubscriptionService;
 use App\Support\ApiResponse;
@@ -27,6 +28,12 @@ class SubscriptionController extends Controller
         private readonly SubscriptionService $subscriptions,
         private readonly RazorpayService $razorpay,
     ) {}
+
+    /** Resolved per call: the access picture belongs to one request. */
+    private function access(): PlanAccessService
+    {
+        return app(PlanAccessService::class);
+    }
 
     /** GET /business/subscription — current plan, subscription and usage. */
     public function index(Request $request): JsonResponse
@@ -65,7 +72,7 @@ class SubscriptionController extends Controller
             );
         }
 
-        $this->subscriptions->subscribe($business, $plan, $request->user());
+        $this->subscriptions->subscribe($business, $plan, $request->user(), null, $this->access()->introEligible($business, $plan));
 
         return ApiResponse::success(
             $this->present($business),
@@ -108,6 +115,9 @@ class SubscriptionController extends Controller
     private function present($business): array
     {
         $state = $this->subscriptions->state($business);
+        $this->access()->forget($business);
+        $access = $this->access()->snapshot($business);
+        $endsAt = $access['endsAt'];
 
         return [
             'plan' => $state['plan'] ? new PlanResource($state['plan']) : null,
@@ -115,6 +125,24 @@ class SubscriptionController extends Controller
                 ? new SubscriptionResource($state['subscription']->loadMissing('plan'))
                 : null,
             'usage' => $state['usage'],
+            // What the plan lets the shop use right now — the panel and the app
+            // lock what is not included, with an upgrade button.
+            'access' => [
+                // Free days used up or a paid plan ended: menu-only until a plan is bought.
+                'expired' => $access['expired'],
+                'endsAt' => $endsAt?->toIso8601String(),
+                'daysLeft' => $endsAt !== null && $endsAt->isFuture() ? (int) ceil(now()->diffInSeconds($endsAt) / 86400) : ($endsAt !== null ? 0 : null),
+                'onFreePlan' => $state['subscription'] === null,
+                'modules' => collect($access['modules'])->map(fn (array $m) => [
+                    'allowed' => $m['allowed'],
+                    'reason' => $m['reason'],
+                    'until' => $m['until']?->toIso8601String(),
+                ])->all(),
+            ],
+            // Plans whose first-time offer this shop can still take.
+            'introEligible' => \App\Models\Plan::query()->get()
+                ->filter(fn ($p) => $this->access()->introEligible($business, $p))
+                ->pluck('key')->values()->all(),
         ];
     }
 }

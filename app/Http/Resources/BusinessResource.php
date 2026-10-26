@@ -49,6 +49,12 @@ class BusinessResource extends JsonResource
             'whatsapp' => $this->whatsapp,
             'gst' => $this->gst,
             'status' => $this->status->value,
+            // A shop started in the vendor app stays hidden until set up.
+            'setupComplete' => $this->setup_completed_at !== null,
+            // Which vendor-app tools apply (kitchen screen for food & bakery).
+            'businessType' => $this->businessType()->value,
+            'kitchenEnabled' => $this->usesKitchen(),
+            'setupMissing' => $this->setup_completed_at !== null ? [] : $this->setupMissing(),
             'verified' => $this->verified,
             'featured' => $this->featured,
             'averageRating' => (float) $this->average_rating,

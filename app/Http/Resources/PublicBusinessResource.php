@@ -2,8 +2,10 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\ServiceType;
 use App\Models\Business;
 use App\Services\OrderPaymentService;
+use App\Services\PlanAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
@@ -40,9 +42,12 @@ class PublicBusinessResource extends JsonResource
             // Temporarily closed by the owner until this time (null = not closed).
             'closedUntil' => $this->isTemporarilyClosed() ? $this->closed_until->toIso8601String() : null,
             'closedNote' => $this->isTemporarilyClosed() ? $this->closed_note : null,
-            'ordersPaused' => (bool) $this->orders_paused,
+            // Paused by the owner, or the shop's plan has no online ordering —
+            // either way the menu shows as a catalogue.
+            'ordersPaused' => (bool) $this->orders_paused || ! $this->access()->orderingOpen($this->resource),
             // Arriving by link/QR locks the customer app to this shop (premium).
-            'storeMode' => $this->hasStoreMode(),
+            'storeMode' => $this->hasActivePersonalLink()
+                || ($this->access()->allows($this->resource, 'store_mode') && (bool) $this->currentPlan()?->hasFeature('store_mode')),
             'phone' => $this->phone,
             'website' => $this->website,
             'facebook' => $this->facebook,
@@ -73,6 +78,10 @@ class PublicBusinessResource extends JsonResource
     private function buildService(): array
     {
         $modes = array_map(fn ($t) => $t->value, $this->serviceModes());
+        // Home delivery only while the shop's plan includes it.
+        if (! $this->access()->allows($this->resource, 'delivery')) {
+            $modes = array_values(array_filter($modes, fn ($m) => $m !== ServiceType::Delivery->value)) ?: [ServiceType::default()->value];
+        }
 
         return [
             'modes' => $modes,
@@ -85,6 +94,11 @@ class PublicBusinessResource extends JsonResource
             // the rule and can never offer something the server would refuse.
             'payment' => app(OrderPaymentService::class)->optionsFor($this->resource),
         ];
+    }
+
+    private function access(): PlanAccessService
+    {
+        return app(PlanAccessService::class);
     }
 
     /**

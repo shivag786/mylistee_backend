@@ -231,6 +231,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('profile', [BusinessController::class, 'show'])->name('profile.show');
             Route::put('profile', [BusinessController::class, 'update'])->name('profile.update');
             Route::get('dashboard', [BusinessController::class, 'dashboard'])->name('dashboard');
+            Route::post('setup/complete', [BusinessController::class, 'completeSetup'])->name('setup.complete');
 
             // Settings → availability: close for a while / reopen / pause orders.
             Route::post('close', [\App\Http\Controllers\Api\V1\Business\AvailabilityController::class, 'close'])->name('close');
@@ -312,7 +313,13 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Order queue (Phase 7.5) — polled by the dashboard; owner drives status
             Route::get('orders', [OwnerOrderController::class, 'index'])->name('orders.index');
+            // Walk-in orders taken at the counter (vendor app).
+            Route::post('orders', [OwnerOrderController::class, 'store'])->name('orders.store');
             Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
+            // Kitchen screen: queued -> preparing -> ready, and the shop's switch.
+            Route::patch('orders/{uuid}/kitchen', [OwnerOrderController::class, 'kitchen'])->name('orders.kitchen');
+            Route::get('kitchen', [\App\Http\Controllers\Api\V1\Business\KitchenController::class, 'index'])->name('kitchen.index');
+            Route::put('kitchen', [\App\Http\Controllers\Api\V1\Business\KitchenController::class, 'setting'])->name('kitchen.setting');
             // Ring this phone with a sample new-order alert.
             Route::post('order-alerts/test', [\App\Http\Controllers\Api\V1\Business\OrderAlertController::class, 'test'])
                 ->middleware('throttle:5,1')
@@ -483,6 +490,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('feature-flags', [FeatureFlagController::class, 'index'])->name('flags.index');
             Route::patch('feature-flags/{key}', [FeatureFlagController::class, 'update'])->name('flags.update');
             Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
+            // The Listee Business phone app's colours + splash time.
+            Route::get('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'show'])->name('vendor-app-theme.show');
+            Route::put('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'update'])->name('vendor-app-theme.update');
+            Route::delete('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'reset'])->name('vendor-app-theme.reset');
             Route::put('settings', [SettingController::class, 'update'])->name('settings.update');
             Route::post('settings/test-email', [SettingController::class, 'testEmail'])
                 ->middleware('throttle:5,1')

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\KitchenStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
@@ -24,6 +25,11 @@ class Order extends Model
 
     protected $fillable = [
         'token',
+        'source',
+        'customer_label',
+        'kitchen_status',
+        'kitchen_started_at',
+        'ready_at',
         'business_id',
         'customer_id',
         'table_id',
@@ -84,6 +90,9 @@ class Order extends Model
             'placed_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'paid_at' => 'datetime',
+            'kitchen_status' => KitchenStatus::class,
+            'kitchen_started_at' => 'datetime',
+            'ready_at' => 'datetime',
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];

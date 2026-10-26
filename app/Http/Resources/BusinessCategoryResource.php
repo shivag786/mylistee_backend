@@ -26,6 +26,7 @@ class BusinessCategoryResource extends JsonResource
             'description' => $this->description,
             'showOnHomepage' => (bool) $this->show_on_homepage,
             'showInSearch' => (bool) $this->show_in_search,
+            'businessType' => ($this->business_type ?? \App\Enums\BusinessType::Food)->value,
         ];
     }
 }

@@ -29,6 +29,12 @@ class PlanController extends Controller
         'maxOfferDays' => 'max_offer_days',
         'maxQrCodes' => 'max_qr_codes',
         'maxGalleryImages' => 'max_gallery_images',
+        'maxProducts' => 'max_products',
+        'durationDays' => 'duration_days',
+        'introPrice' => 'intro_price',
+        'introDays' => 'intro_days',
+        'introEndsAt' => 'intro_ends_at',
+        'introLabel' => 'intro_label',
         'isPublic' => 'is_public',
         'sortOrder' => 'sort_order',
     ];
@@ -59,6 +65,7 @@ class PlanController extends Controller
             'maxOfferDays' => ['nullable', 'integer', 'min:1'],
             'maxQrCodes' => ['nullable', 'integer', 'min:1'],
             'maxGalleryImages' => ['nullable', 'integer', 'min:0'],
+            ...$this->accessRules(false),
             'features' => ['sometimes', 'array'],
             'features.*' => ['string'],
             'badge' => ['nullable', 'string', 'max:24'],
@@ -66,7 +73,11 @@ class PlanController extends Controller
             'sortOrder' => ['sometimes', 'integer'],
         ]);
 
-        $plan = Plan::create($this->mapPayload($validated));
+        $payload = $this->mapPayload($validated);
+        if (($payload['duration_days'] ?? null) !== null) {
+            $payload['days_from'] = now();
+        }
+        $plan = Plan::create($payload);
         $this->audit->log($request->user(), 'plan.create', $plan, "Created plan {$plan->name}");
 
         return ApiResponse::success(new PlanResource($plan), 'Plan created.', status: 201);
@@ -93,6 +104,7 @@ class PlanController extends Controller
             'maxOfferDays' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'maxQrCodes' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'maxGalleryImages' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            ...$this->accessRules(true),
             'features' => ['sometimes', 'array'],
             'features.*' => ['string'],
             'badge' => ['sometimes', 'nullable', 'string', 'max:24'],
@@ -101,10 +113,38 @@ class PlanController extends Controller
         ]);
 
         $payload = $this->mapPayload($validated);
+        // Free days count from the day they are first set, so turning them on
+        // never ends an older shop's free time on the spot.
+        if (($payload['duration_days'] ?? null) !== null && $plan->days_from === null) {
+            $payload['days_from'] = now();
+        }
         $plan->update($payload);
         $this->audit->log($request->user(), 'plan.update', $plan, "Updated plan {$plan->name}", $payload);
 
         return ApiResponse::success(new PlanResource($plan->fresh()), 'Plan updated.');
+    }
+
+    /**
+     * Rules for the plan's access fields: duration, product cap, modules and
+     * the first-time offer.
+     *
+     * @return array<string, mixed>
+     */
+    private function accessRules(bool $partial): array
+    {
+        $opt = $partial ? ['sometimes', 'nullable'] : ['nullable'];
+
+        return [
+            'durationDays' => [...$opt, 'integer', 'min:1', 'max:3650'],
+            'maxProducts' => [...$opt, 'integer', 'min:0'],
+            'modules' => [...$opt, 'array'],
+            'modules.*.on' => ['required', 'boolean'],
+            'modules.*.days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+            'introPrice' => [...$opt, 'numeric', 'min:0'],
+            'introDays' => [...$opt, 'integer', 'min:1', 'max:3650', 'required_with:introPrice'],
+            'introEndsAt' => [...$opt, 'date'],
+            'introLabel' => [...$opt, 'string', 'max:60'],
+        ];
     }
 
     /**
@@ -118,6 +158,13 @@ class PlanController extends Controller
         $payload = [];
         foreach ($validated as $field => $value) {
             $payload[self::FIELD_MAP[$field] ?? $field] = $value;
+        }
+        // Only known modules, stored as {on, days}.
+        if (isset($payload['modules']) && is_array($payload['modules'])) {
+            $payload['modules'] = collect($payload['modules'])
+                ->only(array_keys(\App\Services\PlanAccessService::modules()))
+                ->map(fn ($m) => ['on' => (bool) $m['on'], 'days' => isset($m['days']) ? (int) $m['days'] : null])
+                ->all();
         }
 
         return $payload;

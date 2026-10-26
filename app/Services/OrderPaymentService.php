@@ -67,11 +67,15 @@ class OrderPaymentService
     public function optionsFor(Business $business): array
     {
         $setting = $this->serviceSettings->for($business);
-        $online = $this->razorpay->isConfigured();
+        // The shop's plan decides which ways to pay are open at all.
+        $access = app(PlanAccessService::class);
+        $planOnline = $access->allows($business, 'pay_online');
+        $planCounter = $access->allows($business, 'pay_counter');
+        $online = $planOnline && $this->razorpay->isConfigured();
 
         return [
             'onlineAvailable' => $online,
-            'codAvailable' => ! $online || (bool) $setting->cod_enabled,
+            'codAvailable' => $planCounter && (! $online || (bool) $setting->cod_enabled),
             'paymentMode' => $setting->payment_mode ?? 'full',
             'partialPercent' => (int) ($setting->partial_percent ?? 50),
             // A fee added to the customer's online payment. Off by default: the

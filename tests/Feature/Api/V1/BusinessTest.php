@@ -4,6 +4,7 @@ namespace Tests\Feature\Api\V1;
 
 use App\Models\Business;
 use App\Models\BusinessCategory;
+use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -55,6 +56,98 @@ class BusinessTest extends TestCase
 
         $this->assertDatabaseHas('businesses', ['name' => 'Chai Point', 'owner_id' => $owner->id]);
         $this->assertDatabaseHas('qr_codes', ['type' => 'primary']);
+    }
+
+    public function test_web_registration_is_live_straight_away(): void
+    {
+        $category = BusinessCategory::factory()->create();
+
+        $this->actingAsToken($this->owner())->postJson('/api/v1/business', [
+            'name' => 'Chai Point',
+            'category' => $category->uuid,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.setupComplete', true);
+    }
+
+    public function test_a_draft_shop_from_the_app_stays_hidden_until_set_up(): void
+    {
+        $owner = $this->owner();
+        $category = BusinessCategory::factory()->create();
+
+        // Started with just a name and category, to add products first.
+        $slug = $this->actingAsToken($owner)->postJson('/api/v1/business', [
+            'name' => 'Samosa Corner',
+            'category' => $category->uuid,
+            'draft' => true,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.setupComplete', false)
+            ->assertJsonPath('data.setupMissing', ['address', 'city'])
+            ->json('data.slug');
+
+        // Customers can't see it, but the owner can already build the menu.
+        $this->getJson("/api/v1/businesses/{$slug}")->assertNotFound();
+        $this->postJson('/api/v1/business/products', ['name' => 'Samosa', 'selling_price' => 20])->assertCreated();
+
+        // Going live needs the address first.
+        $this->postJson('/api/v1/business/setup/complete')
+            ->assertStatus(422)
+            ->assertJsonPath('errors.setup.0', "Add your shop's address, city to go live.");
+
+        $this->putJson('/api/v1/business/profile', [
+            'name' => 'Samosa Corner',
+            'category' => $category->uuid,
+            'address' => '12 MG Road',
+            'city' => 'Lucknow',
+        ])->assertOk();
+
+        $this->postJson('/api/v1/business/setup/complete')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.setupComplete', true);
+
+        $this->getJson("/api/v1/businesses/{$slug}")->assertOk();
+    }
+
+    public function test_finishing_setup_does_not_lift_an_admin_suspension(): void
+    {
+        $owner = $this->owner();
+        $business = Business::factory()->create([
+            'owner_id' => $owner->id,
+            'status' => 'suspended',
+            'address' => '12 MG Road',
+            'city' => 'Lucknow',
+            'setup_completed_at' => null,
+        ]);
+
+        $this->actingAsToken($owner)->postJson('/api/v1/business/setup/complete')
+            ->assertOk()->assertJsonPath('data.status', 'suspended');
+        $this->assertNotNull($business->fresh()->setup_completed_at);
+    }
+
+    public function test_dashboard_shows_todays_sales_and_a_week_trend(): void
+    {
+        $owner = $this->owner();
+        $business = Business::factory()->create(['owner_id' => $owner->id]);
+        $order = fn (array $a) => Order::factory()->create(['business_id' => $business->id] + $a);
+
+        $order(['status' => 'paid', 'total' => 200, 'vendor_earning' => 190, 'paid_at' => now()]);
+        $order(['status' => 'completed', 'total' => 100, 'platform_fee' => 2, 'paid_at' => now()]);
+        $order(['status' => 'completed', 'total' => 50, 'paid_at' => now()->subDays(2), 'created_at' => now()->subDays(2)]);
+        $order(['status' => 'placed', 'total' => 80]);
+        $order(['status' => 'cancelled', 'total' => 999]);
+
+        $sales = $this->actingAsToken($owner)->getJson('/api/v1/business/dashboard')
+            ->assertOk()->json('data.sales');
+
+        $this->assertSame(3, $sales['todayOrders']);        // paid, completed, placed
+        $this->assertEquals(300, $sales['todaySales']);
+        $this->assertEquals(288, $sales['todayEarnings']);  // 190 + (100 - 2)
+        $this->assertSame(1, $sales['waitingOrders']);
+        $this->assertEquals(350, $sales['weekSales']);
+        $this->assertCount(7, $sales['series']);
+        $this->assertEquals(300, end($sales['series'])['sales']);
     }
 
     public function test_registration_generates_a_unique_slug_on_collision(): void

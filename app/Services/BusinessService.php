@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\BusinessStatus;
+use App\Enums\OrderStatus;
 use App\Models\Business;
 use App\Models\BusinessGallery;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Business owner domain logic (document/phase/07). Keeps controllers thin:
@@ -26,12 +29,16 @@ class BusinessService
      * @param  array<string, mixed>  $data
      * @param  array{logo?: UploadedFile, cover?: UploadedFile}  $files
      */
-    public function register(User $owner, array $data, array $files = []): Business
+    public function register(User $owner, array $data, array $files = [], bool $draft = false): Business
     {
-        return DB::transaction(function () use ($owner, $data, $files): Business {
+        return DB::transaction(function () use ($owner, $data, $files, $draft): Business {
             $data['owner_id'] = $owner->id;
             $data['created_by'] = $owner->id;
             $data['owner_name'] = $data['owner_name'] ?? $owner->name;
+            // A draft is hidden (pending) until completeSetup(); anything else
+            // is live straight away, as before.
+            $data['status'] = $draft ? BusinessStatus::Pending : BusinessStatus::Active;
+            $data['setup_completed_at'] = $draft ? null : now();
 
             if (isset($files['logo'])) {
                 $data['logo_path'] = $this->images->store($files['logo'], 'businesses/logos');
@@ -47,6 +54,33 @@ class BusinessService
             // before the resource serializes them.
             return $business->refresh()->load(['category', 'gallery', 'qrCode']);
         });
+    }
+
+    /**
+     * Take a draft shop live once it has what customers need to find it. A
+     * shop the admin has since suspended or rejected keeps that status.
+     *
+     * @throws ValidationException when the address or category is missing
+     */
+    public function completeSetup(Business $business): Business
+    {
+        if ($business->setup_completed_at !== null) {
+            return $business;
+        }
+
+        $missing = $business->setupMissing();
+        if ($missing !== []) {
+            throw ValidationException::withMessages([
+                'setup' => ['Add your shop\'s '.implode(', ', $missing).' to go live.'],
+            ]);
+        }
+
+        $business->forceFill([
+            'setup_completed_at' => now(),
+            'status' => $business->status === BusinessStatus::Pending ? BusinessStatus::Active : $business->status,
+        ])->save();
+
+        return $business;
     }
 
     /**
@@ -129,6 +163,54 @@ class BusinessService
             ],
             'onboarding' => $this->onboardingChecklist($business),
             'plan' => $this->planSummary($business),
+            'sales' => $this->salesSummary($business),
+        ];
+    }
+
+    /**
+     * Money in, for the vendor app's home screen: today's orders and takings,
+     * what the shop keeps after Listee's fee, and a 7-day trend. "Sales" are
+     * orders that were paid; an order counts on the day it was paid.
+     *
+     * @return array<string, mixed>
+     */
+    private function salesSummary(Business $business): array
+    {
+        $today = \Illuminate\Support\Carbon::today();
+        $from = $today->copy()->subDays(6);
+
+        $paid = $business->orders()
+            ->whereIn('status', [OrderStatus::Paid->value, OrderStatus::Completed->value])
+            ->where('paid_at', '>=', $from)
+            ->get(['total', 'vendor_earning', 'platform_fee', 'paid_at']);
+
+        $byDay = [];
+        foreach ($paid as $order) {
+            $key = $order->paid_at->toDateString();
+            $byDay[$key] = ($byDay[$key] ?? 0) + (float) $order->total;
+        }
+
+        $series = [];
+        for ($day = $from->copy(); $day->lte($today); $day->addDay()) {
+            $key = $day->toDateString();
+            $series[] = ['date' => $key, 'sales' => round($byDay[$key] ?? 0, 2)];
+        }
+
+        $todayPaid = $paid->filter(fn ($o) => $o->paid_at->isSameDay($today));
+
+        return [
+            'todayOrders' => $business->orders()
+                ->whereNotIn('status', [OrderStatus::AwaitingPayment->value, OrderStatus::Cancelled->value])
+                ->whereDate('created_at', $today)
+                ->count(),
+            'todaySales' => round((float) $todayPaid->sum('total'), 2),
+            // Older orders have no stored earning: the total less Listee's fee.
+            'todayEarnings' => round((float) $todayPaid->sum(
+                fn ($o) => $o->vendor_earning ?? ((float) $o->total - (float) $o->platform_fee),
+            ), 2),
+            'waitingOrders' => $business->orders()->where('status', OrderStatus::Placed->value)->count(),
+            'weekSales' => round((float) $paid->sum('total'), 2),
+            'series' => $series,
         ];
     }
 

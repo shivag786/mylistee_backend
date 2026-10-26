@@ -76,9 +76,7 @@ class PlanLimitService
      */
     public function canSendPush(Business $business): bool
     {
-        $plan = $business->currentPlan();
-
-        return $plan === null || $plan->hasFeature('push_notifications');
+        return app(PlanAccessService::class)->allows($business, 'notifications');
     }
 
     private function message(string $noun, int $limit): string

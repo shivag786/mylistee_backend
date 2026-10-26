@@ -36,6 +36,7 @@ class BusinessFactory extends Factory
             'phone' => fake()->numerify('##########'),
             'email' => fake()->companyEmail(),
             'status' => BusinessStatus::Active,
+            'setup_completed_at' => now(),
             'verified' => false,
             'featured' => false,
         ];

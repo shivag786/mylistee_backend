@@ -43,6 +43,9 @@ class StoreBusinessRequest extends FormRequest
             'gst' => ['nullable', 'string', 'max:32'],
             'logo' => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:4096'],
             'cover' => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:6144'],
+            // Vendor app: start the shop now (to add products), finish the
+            // address later. Stays hidden from customers until then.
+            'draft' => ['sometimes', 'boolean'],
         ];
     }
 

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CoinSource;
+use App\Enums\KitchenStatus;
 use App\Enums\NotificationType;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
@@ -164,6 +165,124 @@ class OrderService
 
             return $order->load('items');
         });
+    }
+
+    /**
+     * A walk-in order the shop takes at the counter. Priced like any order (the
+     * shop's bill discount applies) but there is no customer account: no coins,
+     * no coupons, and the name said at the counter goes in `customer_label`.
+     * The shop took it, so it starts accepted and goes to the kitchen; paid
+     * straight away when [$paidWith] is given. Taken even with online orders
+     * paused — the customer is standing there.
+     *
+     * @param  array<int, array{type: string, id: string, quantity?: int, variant?: string|null, addons?: list<string>|null}>  $items
+     *
+     * @throws ValidationException
+     */
+    public function placeAtCounter(
+        Business $business,
+        User $actor,
+        array $items,
+        ?ServiceType $serviceType = null,
+        ?string $tableUuid = null,
+        ?string $note = null,
+        ?string $customerLabel = null,
+        ?string $serviceAddress = null,
+        ?PaymentMethod $paidWith = null,
+    ): Order {
+        if ($items === []) {
+            throw ValidationException::withMessages(['items' => ['Add at least one item.']]);
+        }
+
+        [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
+        $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
+
+        $order = DB::transaction(function () use ($business, $items, $serviceType, $table, $serviceAddress, $deliveryFee, $note, $customerLabel): Order {
+            $priced = $this->priceItems($business, $items);
+            $subtotal = $priced['subtotal'];
+            ['billDiscount' => $billDiscount] = $this->discounts($business, null, $subtotal, null);
+            $total = round($subtotal - $billDiscount + $deliveryFee, 2);
+            $fees = $this->fees->split($total, 0.0);
+            $stockTaken = $this->stock->deduct($priced['stockNeeds']);
+            $now = Carbon::now();
+
+            $order = Order::create([
+                'token' => $this->uniqueToken($business),
+                'business_id' => $business->id,
+                'customer_id' => null,
+                'source' => 'counter',
+                'customer_label' => $customerLabel !== null && trim($customerLabel) !== '' ? trim($customerLabel) : null,
+                'table_id' => $table?->id,
+                'status' => OrderStatus::Confirmed,
+                'kitchen_status' => $business->usesKitchen() ? KitchenStatus::Queued : null,
+                'payment_choice' => OrderPaymentService::CHOICE_COD,
+                'online_amount' => 0,
+                'convenience_fee' => 0,
+                'platform_fee' => $fees['platform'],
+                'gateway_fee' => $fees['gateway'],
+                'vendor_earning' => $fees['vendor'],
+                'service_type' => $serviceType,
+                'subtotal' => $subtotal,
+                'bill_discount' => $billDiscount,
+                'coupon_discount' => 0,
+                'coins_used' => 0,
+                'coin_discount' => 0,
+                'total' => $total,
+                'delivery_fee' => $deliveryFee,
+                'coins_earned' => 0,
+                'stock_deducted' => $stockTaken === [] ? null : $stockTaken,
+                'note' => $note,
+                'service_address' => $serviceAddress,
+                'placed_at' => $now,
+                'confirmed_at' => $now,
+            ]);
+
+            foreach ($priced['lines'] as $line) {
+                $order->items()->create($line);
+            }
+
+            return $order;
+        });
+
+        if ($paidWith !== null) {
+            $order = $this->transition($order, OrderStatus::Paid, $actor, $paidWith);
+        }
+
+        return $order->load('items');
+    }
+
+    /**
+     * Move an accepted order through the kitchen: queued → preparing → ready
+     * (straight to ready is fine). Ready tells the customer to collect it.
+     *
+     * @throws ValidationException
+     */
+    public function setKitchenStatus(Order $order, KitchenStatus $to): Order
+    {
+        if (! in_array($order->status, [OrderStatus::Confirmed, OrderStatus::Paid], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Only accepted orders are in the kitchen.'],
+            ]);
+        }
+
+        $order->update(match ($to) {
+            KitchenStatus::Queued => ['kitchen_status' => $to, 'kitchen_started_at' => null, 'ready_at' => null],
+            KitchenStatus::Preparing => ['kitchen_status' => $to, 'kitchen_started_at' => $order->kitchen_started_at ?? Carbon::now(), 'ready_at' => null],
+            KitchenStatus::Ready => ['kitchen_status' => $to, 'ready_at' => Carbon::now()],
+        });
+
+        if ($to === KitchenStatus::Ready && $order->customer) {
+            $where = $order->service_type === ServiceType::Delivery ? 'It is on its way soon.' : 'Please collect it at the counter.';
+            $this->notifications->notify(
+                $order->customer,
+                NotificationType::OrderUpdate,
+                'Your order is ready 🍽️',
+                "Order {$order->token} at {$order->business->name} is ready. {$where}",
+                ['link' => '/orders'],
+            );
+        }
+
+        return $order->fresh('items');
     }
 
     /**
@@ -444,7 +563,12 @@ class OrderService
     /** The shop took the order. Tell the customer, who may be watching the page. */
     private function markConfirmed(Order $order): void
     {
-        $order->update(['status' => OrderStatus::Confirmed, 'confirmed_at' => Carbon::now()]);
+        $order->update([
+            'status' => OrderStatus::Confirmed,
+            'confirmed_at' => Carbon::now(),
+            // Accepted: straight onto the kitchen screen, where the shop has one.
+            'kitchen_status' => $order->business->usesKitchen() ? KitchenStatus::Queued : null,
+        ]);
 
         if ($order->customer) {
             $this->notifications->notify(

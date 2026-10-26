@@ -144,6 +144,7 @@ class CategoryController extends Controller
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'show_on_homepage' => ['nullable', 'boolean'],
             'show_in_search' => ['nullable', 'boolean'],
+            'business_type' => ['nullable', Rule::in(\App\Enums\BusinessType::values())],
             'image' => ['nullable', 'image', 'max:4096'],
         ]);
     }

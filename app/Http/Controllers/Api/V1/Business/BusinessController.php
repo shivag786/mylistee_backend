@@ -53,6 +53,7 @@ class BusinessController extends Controller
                 'logo' => $request->file('logo'),
                 'cover' => $request->file('cover'),
             ]),
+            draft: $request->boolean('draft'),
         );
 
         return ApiResponse::success(
@@ -82,6 +83,22 @@ class BusinessController extends Controller
         );
 
         return ApiResponse::success(new BusinessResource($business), 'Business updated.');
+    }
+
+    /** POST /business/setup/complete — take a draft shop (from the vendor app) live. */
+    public function completeSetup(Request $request): JsonResponse
+    {
+        $business = $request->user()->business();
+        if ($business === null) {
+            return ApiResponse::error('No business found for this account.', status: 404);
+        }
+
+        $business = $this->businesses->completeSetup($business);
+
+        return ApiResponse::success(
+            new BusinessResource($business->load(['category', 'gallery', 'qrCode'])),
+            'Your shop is live! Customers can now see your menu.',
+        );
     }
 
     /** GET /business/dashboard — headline metrics + onboarding + plan. */

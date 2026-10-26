@@ -12,6 +12,7 @@ use App\Models\Review;
 use App\Models\User;
 use App\Services\OrderPaymentService;
 use App\Services\OrderService;
+use App\Services\PlanAccessService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,6 +26,12 @@ use Illuminate\Validation\Rule;
 class OrderController extends Controller
 {
     public function __construct(private readonly OrderService $orders) {}
+
+    /** Resolved per call: the access picture belongs to one request. */
+    private function access(): PlanAccessService
+    {
+        return app(PlanAccessService::class);
+    }
 
     /** GET /orders — the customer's orders, newest first. */
     public function index(Request $request): JsonResponse
@@ -113,6 +120,14 @@ class OrderController extends Controller
             return ApiResponse::error('Business not found.', status: 404);
         }
 
+        // The shop's plan decides whether it takes orders, and delivery ones.
+        if (! $this->access()->orderingOpen($business)) {
+            return ApiResponse::error("{$business->name} is not taking orders right now.", ['business' => ["{$business->name} is not taking orders right now."]], 422);
+        }
+        if (($validated['serviceType'] ?? null) === ServiceType::Delivery->value && ! $this->access()->allows($business, 'delivery')) {
+            return ApiResponse::error('This shop does not deliver right now.', ['serviceType' => ['This shop does not deliver right now.']], 422);
+        }
+
         $order = $this->orders->place(
             $business,
             $request->user(),
@@ -161,12 +176,16 @@ class OrderController extends Controller
             return ApiResponse::error('Business not found.', status: 404);
         }
 
-        return ApiResponse::success($this->orders->quote(
+        $quote = $this->orders->quote(
             $business,
             $request->user('sanctum'),
             $validated['items'],
             $validated['couponCode'] ?? null,
             isset($validated['serviceType']) ? ServiceType::from($validated['serviceType']) : null,
-        ), 'Quote.');
+        );
+        // A plan without ordering shows the menu as a catalogue.
+        $quote['acceptingOrders'] = ($quote['acceptingOrders'] ?? true) && $this->access()->orderingOpen($business);
+
+        return ApiResponse::success($quote, 'Quote.');
     }
 }

@@ -62,7 +62,9 @@ class SubscriptionPaymentService
             throw new RuntimeException('Online payments are not available right now. Please try again later.');
         }
 
-        $amountPaise = $this->razorpay->toPaise($plan->price);
+        // First-time offer: its price now, its days once paid (see subscribe()).
+        $intro = app(PlanAccessService::class)->introEligible($business, $plan);
+        $amountPaise = $this->razorpay->toPaise($intro ? (float) $plan->intro_price : (float) $plan->price);
 
         // Receipt is capped at 40 chars by Razorpay and shows up in their
         // dashboard — keep it greppable: plan + business + when.
@@ -86,7 +88,7 @@ class SubscriptionPaymentService
             'amount' => $this->razorpay->toRupees($amountPaise),
             'amount_paise' => $amountPaise,
             'currency' => $plan->currency,
-            'meta' => ['order' => $order],
+            'meta' => ['order' => $order] + ($intro ? ['intro' => true] : []),
         ]);
 
         return [
@@ -100,7 +102,9 @@ class SubscriptionPaymentService
             'planKey' => $plan->key,
             'planName' => $plan->name,
             'name' => config('razorpay.checkout.name'),
-            'description' => "{$plan->name} plan · {$this->intervalLabel($plan->interval)}",
+            'description' => $intro
+                ? "{$plan->name} plan · first-time offer · {$plan->intro_days} days"
+                : "{$plan->name} plan · {$this->intervalLabel($plan->interval)}",
             'themeColor' => config('razorpay.checkout.theme_color'),
             'logo' => config('razorpay.checkout.logo'),
             'prefill' => [

@@ -74,7 +74,12 @@ class OrderResource extends JsonResource
             // Whether the customer has already reviewed this shop — drives the
             // post-order review nudge. Attached by the customer OrderController.
             'reviewed' => (bool) $this->resource->getAttribute('already_reviewed'),
-            'customerName' => $this->whenLoaded('customer', fn () => $this->customer?->name),
+            // A walk-in order has no account: the name said at the counter.
+            'customerName' => $this->customer_label ?? $this->whenLoaded('customer', fn () => $this->customer?->name),
+            // 'app' = the customer ordered; 'counter' = the shop took it in person.
+            'source' => $this->source ?? 'app',
+            'kitchenStatus' => $this->kitchen_status?->value,
+            'readyAt' => $this->ready_at?->toIso8601String(),
             'placedAt' => $this->placed_at?->toIso8601String(),
             'confirmedAt' => $this->confirmed_at?->toIso8601String(),
             'paidAt' => $this->paid_at?->toIso8601String(),

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Admin;
 
+use App\Enums\BusinessType;
 use App\Models\BusinessCategory;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -32,6 +33,8 @@ class AdminCategoryResource extends JsonResource
             'status' => $this->status,
             'showOnHomepage' => (bool) $this->show_on_homepage,
             'showInSearch' => (bool) $this->show_in_search,
+            // Decides which vendor-app tools shops in it get (kitchen for food & bakery).
+            'businessType' => ($this->business_type ?? BusinessType::Food)->value,
             'businessCount' => $this->when(isset($this->businesses_count), fn () => (int) $this->businesses_count),
             'createdAt' => $this->created_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),

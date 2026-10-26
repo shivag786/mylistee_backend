@@ -4,6 +4,8 @@ namespace App\Services;
 
 use Kreait\Firebase\Contract\Auth as FirebaseAuth;
 use Kreait\Firebase\Contract\Messaging as FirebaseMessaging;
+use App\Support\LaravelCachePool;
+use Illuminate\Support\Facades\Cache;
 use Kreait\Firebase\Factory;
 use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Messaging\CloudMessage;
@@ -31,6 +33,19 @@ class FirebaseService
         return storage_path('app/'.ltrim((string) config('firebase.credentials'), '/'));
     }
 
+    /**
+     * The SDK with a cache that outlives the request: Google's token-signing
+     * keys and the service account's access token are fetched once and reused
+     * (they carry their own expiry), instead of on every sign-in and push. The
+     * file store works whatever CACHE_STORE says.
+     */
+    private function factory(): Factory
+    {
+        return (new Factory())
+            ->withServiceAccount($this->credentialsPath())
+            ->withDefaultCache(new LaravelCachePool(Cache::store('file'), 'firebase:'));
+    }
+
     /** True when a Firebase service account JSON is available on disk. */
     public function isConfigured(): bool
     {
@@ -45,7 +60,7 @@ class FirebaseService
         }
 
         if ($this->auth === null) {
-            $this->auth = (new Factory())->withServiceAccount($this->credentialsPath())->createAuth();
+            $this->auth = $this->factory()->createAuth();
         }
 
         return $this->auth;
@@ -82,7 +97,7 @@ class FirebaseService
         }
 
         if ($this->messaging === null) {
-            $this->messaging = (new Factory())->withServiceAccount($this->credentialsPath())->createMessaging();
+            $this->messaging = $this->factory()->createMessaging();
         }
 
         return $this->messaging;

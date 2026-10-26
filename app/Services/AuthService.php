@@ -98,6 +98,12 @@ class AuthService
 
         RateLimiter::clear($key);
 
+        // PINs set before the lighter hash cost: re-hash once, now that we
+        // have the PIN, so every later sign-in is quick.
+        if ($user->pinNeedsRehash()) {
+            $user->forceFill(['pin' => $pin])->saveQuietly();
+        }
+
         return $this->issueSession($user);
     }
 

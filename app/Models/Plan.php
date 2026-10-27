@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
@@ -24,6 +25,7 @@ class Plan extends Model
         'currency',
         'interval',
         'duration_days',
+        'duration_months',
         'days_from',
         'modules',
         'max_products',
@@ -36,12 +38,15 @@ class Plan extends Model
         'max_active_promotions',
         'max_push_per_month',
         'push_reach_per_month',
+        'push_per_customer_per_month',
+        'customer_details',
         'max_offer_days',
         'max_qr_codes',
         'max_gallery_images',
         'features',
         'badge',
         'is_public',
+        'is_active',
         'is_default',
         'sort_order',
     ];
@@ -53,6 +58,7 @@ class Plan extends Model
             'features' => 'array',
             'modules' => 'array',
             'duration_days' => 'integer',
+            'duration_months' => 'integer',
             'days_from' => 'datetime',
             'max_products' => 'integer',
             'intro_price' => 'decimal:2',
@@ -63,10 +69,12 @@ class Plan extends Model
             'max_active_promotions' => 'integer',
             'max_push_per_month' => 'integer',
             'push_reach_per_month' => 'integer',
+            'push_per_customer_per_month' => 'integer',
             'max_offer_days' => 'integer',
             'max_qr_codes' => 'integer',
             'max_gallery_images' => 'integer',
             'is_public' => 'boolean',
+            'is_active' => 'boolean',
             'is_default' => 'boolean',
             'sort_order' => 'integer',
         ];
@@ -131,6 +139,39 @@ class Plan extends Model
         ];
     }
 
+    /**
+     * When one period of this plan, starting at $from, ends: the admin's days or
+     * months, else the billing interval. Null = never (lifetime).
+     */
+    public function periodEnd(Carbon $from): ?Carbon
+    {
+        if ($this->duration_months !== null) {
+            return $from->copy()->addMonthsNoOverflow($this->duration_months);
+        }
+        if ($this->duration_days !== null) {
+            return $from->copy()->addDays($this->duration_days);
+        }
+
+        return match ($this->interval) {
+            'quarter' => $from->copy()->addMonths(3),
+            'year' => $from->copy()->addYear(),
+            'lifetime' => null,
+            default => $from->copy()->addMonth(),
+        };
+    }
+
+    /** The plan has its own length (days or months) instead of the interval. */
+    public function hasDuration(): bool
+    {
+        return $this->duration_days !== null || $this->duration_months !== null;
+    }
+
+    /** Shops see customers' email and phone in full (else masked). */
+    public function showsFullCustomerDetails(): bool
+    {
+        return $this->customer_details === 'full';
+    }
+
     /** The first-time offer is set and still open. */
     public function introActive(): bool
     {
@@ -147,6 +188,6 @@ class Plan extends Model
     /** @param  Builder<Plan>  $query */
     public function scopePublic(Builder $query): Builder
     {
-        return $query->where('is_public', true)->orderBy('sort_order');
+        return $query->where('is_public', true)->where('is_active', true)->orderBy('sort_order');
     }
 }

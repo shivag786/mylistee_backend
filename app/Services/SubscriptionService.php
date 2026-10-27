@@ -97,14 +97,11 @@ class SubscriptionService
 
             $startsAt = Carbon::now();
             $from = $carryFrom ?? $startsAt->copy();
-            // The admin's days win over the interval; the intro offer has its own.
-            $days = $intro ? $plan->intro_days : $plan->duration_days;
-            $endsAt = $days !== null ? $from->copy()->addDays($days) : match ($plan->interval) {
-                'quarter' => $from->copy()->addMonths(3),
-                'year' => $from->copy()->addYear(),
-                'lifetime' => null,
-                default => $from->copy()->addMonth(),
-            };
+            // The admin's days or months win over the interval; the intro offer
+            // has its own days.
+            $endsAt = $intro && $plan->intro_days !== null
+                ? $from->copy()->addDays($plan->intro_days)
+                : $plan->periodEnd($from);
             $price = $payment !== null
                 ? (float) $payment->amount
                 : (float) ($intro && $plan->intro_price !== null ? $plan->intro_price : $plan->price);

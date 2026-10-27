@@ -25,6 +25,23 @@ class PushCampaignController extends Controller
         return ApiResponse::success($this->push->summary($business), 'Notification summary.');
     }
 
+    /** GET /business/push/customers?audience=&search=&page= -- the audience as a list. */
+    public function customers(Request $request): JsonResponse
+    {
+        $business = $this->business($request);
+
+        $data = $request->validate([
+            'audience' => ['sometimes', Rule::in(array_keys(ShopPushService::AUDIENCES))],
+            'search' => ['nullable', 'string', 'max:80'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        return ApiResponse::success(
+            $this->push->customers($business, $data['audience'] ?? 'everyone', $data['search'] ?? null, (int) ($data['page'] ?? 1)),
+            'Customers.',
+        );
+    }
+
     /** POST /business/push */
     public function store(Request $request): JsonResponse
     {
@@ -37,6 +54,9 @@ class PushCampaignController extends Controller
             // In-app paths only (e.g. "/b/shop?item=…"), never an outside URL.
             'link' => ['nullable', 'string', 'max:255', 'regex:#^/[^/]#'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100000'],
+            // Only these customers (ids from GET /business/push/customers).
+            'customerIds' => ['nullable', 'array', 'max:1000'],
+            'customerIds.*' => ['string', 'uuid'],
         ]);
 
         $campaign = $this->push->send($business, $request->user(), $data);

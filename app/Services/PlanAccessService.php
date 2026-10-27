@@ -112,8 +112,8 @@ class PlanAccessService
             $endsAt = $subscription->ends_at?->copy();
         } elseif ($plan !== null) {
             $start = $this->freeStart($business, $plan);
-            if ($plan->duration_days !== null) {
-                $freeEndsAt = $start->copy()->addDays($plan->duration_days);
+            if ($plan->hasDuration()) {
+                $freeEndsAt = $plan->periodEnd($start);
                 $endsAt = $freeEndsAt->copy();
                 $expired = $freeEndsAt->isPast();
             }

@@ -26,16 +26,20 @@ class PlanController extends Controller
         'maxActivePromotions' => 'max_active_promotions',
         'maxPushPerMonth' => 'max_push_per_month',
         'pushReachPerMonth' => 'push_reach_per_month',
+        'pushPerCustomerPerMonth' => 'push_per_customer_per_month',
+        'customerDetails' => 'customer_details',
         'maxOfferDays' => 'max_offer_days',
         'maxQrCodes' => 'max_qr_codes',
         'maxGalleryImages' => 'max_gallery_images',
         'maxProducts' => 'max_products',
         'durationDays' => 'duration_days',
+        'durationMonths' => 'duration_months',
         'introPrice' => 'intro_price',
         'introDays' => 'intro_days',
         'introEndsAt' => 'intro_ends_at',
         'introLabel' => 'intro_label',
         'isPublic' => 'is_public',
+        'isActive' => 'is_active',
         'sortOrder' => 'sort_order',
     ];
 
@@ -62,6 +66,8 @@ class PlanController extends Controller
             'maxActivePromotions' => ['nullable', 'integer', 'min:0'],
             'maxPushPerMonth' => ['nullable', 'integer', 'min:0'],
             'pushReachPerMonth' => ['nullable', 'integer', 'min:0'],
+            'pushPerCustomerPerMonth' => ['nullable', 'integer', 'min:1'],
+            'customerDetails' => ['sometimes', 'in:full,masked'],
             'maxOfferDays' => ['nullable', 'integer', 'min:1'],
             'maxQrCodes' => ['nullable', 'integer', 'min:1'],
             'maxGalleryImages' => ['nullable', 'integer', 'min:0'],
@@ -70,11 +76,12 @@ class PlanController extends Controller
             'features.*' => ['string'],
             'badge' => ['nullable', 'string', 'max:24'],
             'isPublic' => ['sometimes', 'boolean'],
+            'isActive' => ['sometimes', 'boolean'],
             'sortOrder' => ['sometimes', 'integer'],
         ]);
 
         $payload = $this->mapPayload($validated);
-        if (($payload['duration_days'] ?? null) !== null) {
+        if ($this->setsDuration($payload)) {
             $payload['days_from'] = now();
         }
         $plan = Plan::create($payload);
@@ -101,6 +108,8 @@ class PlanController extends Controller
             'maxActivePromotions' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'maxPushPerMonth' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'pushReachPerMonth' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'pushPerCustomerPerMonth' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'customerDetails' => ['sometimes', 'in:full,masked'],
             'maxOfferDays' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'maxQrCodes' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'maxGalleryImages' => ['sometimes', 'nullable', 'integer', 'min:0'],
@@ -109,13 +118,20 @@ class PlanController extends Controller
             'features.*' => ['string'],
             'badge' => ['sometimes', 'nullable', 'string', 'max:24'],
             'isPublic' => ['sometimes', 'boolean'],
+            'isActive' => ['sometimes', 'boolean'],
             'sortOrder' => ['sometimes', 'integer'],
         ]);
+
+        // Every shop without a paid plan falls back to the default one, so it
+        // can't be switched off.
+        if ($plan->is_default && $request->has('isActive') && ! $request->boolean('isActive')) {
+            return ApiResponse::error('The default plan is always active.', status: 422);
+        }
 
         $payload = $this->mapPayload($validated);
         // Free days count from the day they are first set, so turning them on
         // never ends an older shop's free time on the spot.
-        if (($payload['duration_days'] ?? null) !== null && $plan->days_from === null) {
+        if ($this->setsDuration($payload) && $plan->days_from === null) {
             $payload['days_from'] = now();
         }
         $plan->update($payload);
@@ -136,6 +152,7 @@ class PlanController extends Controller
 
         return [
             'durationDays' => [...$opt, 'integer', 'min:1', 'max:3650'],
+            'durationMonths' => [...$opt, 'integer', 'min:1', 'max:120'],
             'maxProducts' => [...$opt, 'integer', 'min:0'],
             'modules' => [...$opt, 'array'],
             'modules.*.on' => ['required', 'boolean'],
@@ -145,6 +162,12 @@ class PlanController extends Controller
             'introEndsAt' => [...$opt, 'date'],
             'introLabel' => [...$opt, 'string', 'max:60'],
         ];
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    private function setsDuration(array $payload): bool
+    {
+        return ($payload['duration_days'] ?? null) !== null || ($payload['duration_months'] ?? null) !== null;
     }
 
     /**
@@ -158,6 +181,12 @@ class PlanController extends Controller
         $payload = [];
         foreach ($validated as $field => $value) {
             $payload[self::FIELD_MAP[$field] ?? $field] = $value;
+        }
+        // A plan lasts days or months, never both: setting one clears the other.
+        if (($payload['duration_months'] ?? null) !== null) {
+            $payload['duration_days'] = null;
+        } elseif (($payload['duration_days'] ?? null) !== null) {
+            $payload['duration_months'] = null;
         }
         // Only known modules, stored as {on, days}.
         if (isset($payload['modules']) && is_array($payload['modules'])) {

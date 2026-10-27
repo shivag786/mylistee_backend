@@ -353,6 +353,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Notify customers (push to followers / past customers, plan-capped).
             Route::get('push', [PushCampaignController::class, 'show'])->name('push.show');
+            Route::get('push/customers', [PushCampaignController::class, 'customers'])->name('push.customers');
             Route::post('push', [PushCampaignController::class, 'store'])
                 ->middleware('throttle:10,1')->name('push.store');
 

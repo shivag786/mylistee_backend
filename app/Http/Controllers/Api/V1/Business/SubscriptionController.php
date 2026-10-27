@@ -65,6 +65,12 @@ class SubscriptionController extends Controller
 
         $plan = Plan::where('key', $request->validated('planKey'))->firstOrFail();
 
+        // A plan the admin switched off can't be taken up (shops already on it
+        // keep it until their period ends). The default plan is always open.
+        if (! $plan->is_active && ! $plan->is_default) {
+            return ApiResponse::error('That plan is not available.', status: 422);
+        }
+
         if (! $plan->isFree() && ! $plan->is_default && $this->razorpay->isConfigured()) {
             return ApiResponse::error(
                 'This plan must be paid for. Start the payment from the plans screen.',

@@ -202,6 +202,44 @@ class PlanAccessTest extends TestCase
             ->assertJsonPath('data.access.daysLeft', 50);
     }
 
+    public function test_a_plan_can_last_months_and_setting_months_clears_the_days(): void
+    {
+        [$owner] = $this->shop();
+        Carbon::setTestNow(Carbon::parse('2026-01-31 10:00:00'));
+        $this->editPlan('pro', ['durationDays' => 30]);
+        $this->editPlan('pro', ['durationMonths' => 3, 'durationDays' => null]);
+
+        $plan = Plan::where('key', 'pro')->sole();
+        $this->assertNull($plan->duration_days);
+        $this->assertSame(3, $plan->duration_months);
+
+        $this->token($owner)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertOk()
+            ->assertJsonPath('data.subscription.endsAt', Carbon::parse('2026-04-30 10:00:00')->toIso8601String());
+    }
+
+    public function test_an_inactive_plan_cannot_be_bought_but_shops_on_it_keep_it(): void
+    {
+        [$owner, $business] = $this->shop();
+        $this->token($owner)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertOk();
+        $endsAt = $business->fresh()->activeSubscription()->ends_at;
+
+        $this->editPlan('pro', ['isActive' => false]);
+
+        // Gone from the pricing list, and nobody can take it up…
+        $this->getJson('/api/v1/plans')->assertOk()->assertJsonMissing(['key' => 'pro']);
+        [$other] = $this->shop();
+        $this->token($other)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertStatus(422);
+
+        // …but the shop already on it keeps the same plan and end date.
+        $this->token($owner)->getJson('/api/v1/business/subscription')->assertOk()
+            ->assertJsonPath('data.plan.key', 'pro');
+        $this->assertTrue($business->fresh()->activeSubscription()->ends_at->equalTo($endsAt));
+
+        // The default plan can't be switched off.
+        $this->token(User::factory()->admin()->create())
+            ->patchJson('/api/v1/admin/plans/free', ['isActive' => false])->assertStatus(422);
+    }
+
     public function test_the_plan_caps_how_many_products_a_menu_has(): void
     {
         [$owner] = $this->shop();

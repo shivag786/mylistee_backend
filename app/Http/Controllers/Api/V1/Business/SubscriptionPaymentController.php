@@ -50,7 +50,7 @@ class SubscriptionPaymentController extends Controller
 
         $plan = Plan::where('key', $validated['planKey'])->firstOrFail();
 
-        if (! $plan->is_public) {
+        if (! $plan->is_public || ! $plan->is_active) {
             return ApiResponse::error('That plan is not available.', status: 422);
         }
 

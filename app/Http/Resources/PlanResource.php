@@ -28,6 +28,8 @@ class PlanResource extends JsonResource
             // Days one purchase lasts (null = by the interval); on the free plan,
             // the free period.
             'durationDays' => $this->duration_days,
+            // Or months instead of days (only one is set).
+            'durationMonths' => $this->duration_months,
             // Every module with whether this plan includes it, and for how many days.
             'modules' => collect(array_keys(PlanAccessService::modules()))
                 ->mapWithKeys(fn (string $id) => [$id => $this->moduleConfig($id)])
@@ -47,14 +49,19 @@ class PlanResource extends JsonResource
                 'maxActivePromotions' => $this->max_active_promotions,
                 'maxPushPerMonth' => $this->max_push_per_month,
                 'pushReachPerMonth' => $this->push_reach_per_month,
+                // Notifications one customer can get from the shop a month.
+                'pushPerCustomerPerMonth' => $this->push_per_customer_per_month,
                 'maxOfferDays' => $this->max_offer_days,
                 'maxQrCodes' => $this->max_qr_codes,
                 'maxGalleryImages' => $this->max_gallery_images,
                 'maxProducts' => $this->max_products,
             ],
+            // Customers' email / phone on the notify screen: 'full' or 'masked'.
+            'customerDetails' => $this->customer_details ?? 'masked',
             'features' => $this->features ?? [],
             'badge' => $this->badge,
             'isDefault' => $this->is_default,
+            'isActive' => (bool) ($this->is_active ?? true),
             'isFree' => $this->isFree(),
             'sortOrder' => $this->sort_order,
         ];

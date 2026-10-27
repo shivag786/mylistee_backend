@@ -140,6 +140,88 @@ class ShopPushTest extends TestCase
             ->assertJsonPath('data.reach.remaining', 0);
     }
 
+    public function test_one_customer_gets_at_most_the_plans_number_a_month(): void
+    {
+        $this->enable();
+        Plan::factory()->create([
+            'is_default' => true,
+            'push_reach_per_month' => null,
+            'max_push_per_month' => null,
+            'push_per_customer_per_month' => 1,
+            'features' => ['push_notifications'],
+        ]);
+        [$owner, $business] = $this->shop();
+        $old = $this->customer();
+        Favorite::create(['customer_id' => $old->id, 'business_id' => $business->id]);
+
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'One'])
+            ->assertCreated()->assertJsonPath('data.recipients', 1);
+
+        // Next day: the old follower is capped, a new one still gets it.
+        Carbon::setTestNow(Carbon::parse('2026-10-15 11:00:00', 'Asia/Kolkata')->utc());
+        $new = $this->customer();
+        Favorite::create(['customer_id' => $new->id, 'business_id' => $business->id]);
+
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Two'])
+            ->assertCreated()->assertJsonPath('data.recipients', 1);
+        $this->assertDatabaseHas('shop_push_recipients', ['user_id' => $new->id]);
+        $this->assertSame(1, \DB::table('shop_push_recipients')->where('user_id', $old->id)->count());
+
+        $this->token($owner)->getJson('/api/v1/business/push/customers?audience=followers')
+            ->assertOk()
+            ->assertJsonPath('data.total', 2)
+            ->assertJsonPath('data.customers.1.capped', true);
+
+        // Next month the count starts again.
+        Carbon::setTestNow(Carbon::parse('2026-11-02 11:00:00', 'Asia/Kolkata')->utc());
+        $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Three'])
+            ->assertCreated()->assertJsonPath('data.recipients', 2);
+    }
+
+    public function test_the_list_masks_contact_details_unless_the_plan_shows_them(): void
+    {
+        $this->enable();
+        $plan = Plan::factory()->create(['is_default' => true, 'features' => ['push_notifications']]);
+        [$owner, $business] = $this->shop();
+        $c = User::factory()->create([
+            'role' => UserRole::Customer, 'status' => UserStatus::Active,
+            'name' => 'Rahul', 'email' => 'rahul.k@gmail.com', 'phone' => '9876543210',
+        ]);
+        Favorite::create(['customer_id' => $c->id, 'business_id' => $business->id]);
+
+        $this->token($owner)->getJson('/api/v1/business/push/customers')
+            ->assertOk()
+            ->assertJsonPath('data.customers.0.name', 'Rahul')
+            ->assertJsonPath('data.customers.0.email', 'ra*****@gmail.com')
+            ->assertJsonPath('data.customers.0.phone', '98******10');
+        // Masked: the search can't find someone by a hidden email.
+        $this->token($owner)->getJson('/api/v1/business/push/customers?search=rahul.k@')
+            ->assertJsonPath('data.total', 0);
+
+        $plan->update(['customer_details' => 'full']);
+        $this->token($owner)->getJson('/api/v1/business/push/customers?search=98765')
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.customers.0.email', 'rahul.k@gmail.com')
+            ->assertJsonPath('data.customers.0.phone', '9876543210');
+    }
+
+    public function test_the_owner_can_pick_customers_from_the_list(): void
+    {
+        $this->enable();
+        [$owner, $business] = $this->shop();
+        $a = $this->customer();
+        $b = $this->customer();
+        Favorite::create(['customer_id' => $a->id, 'business_id' => $business->id]);
+        Favorite::create(['customer_id' => $b->id, 'business_id' => $business->id]);
+
+        $this->token($owner)->postJson('/api/v1/business/push', [
+            'audience' => 'followers', 'title' => 'Just you', 'customerIds' => [$b->uuid],
+        ])->assertCreated()->assertJsonPath('data.recipients', 1);
+
+        $this->assertDatabaseHas('notifications', ['user_id' => $b->id]);
+        $this->assertDatabaseMissing('notifications', ['user_id' => $a->id]);
+    }
+
     public function test_outside_links_are_rejected(): void
     {
         $this->enable();

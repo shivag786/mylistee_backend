@@ -10,15 +10,19 @@ use App\Models\FeatureFlag;
 use App\Models\ShopPushCampaign;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
  * Shop → customer push notifications. A shop messages one slice of the people
  * connected to it (followers, past customers, lapsed customers); never random
  * users. Guard rails keep it from turning into spam: the admin switches the
- * module on, the plan sets a monthly reach and send count, one send per shop
- * per day, and nothing goes out during quiet hours.
+ * module on, the plan sets a monthly reach and send count and how often one
+ * customer can be messaged a month, one send per shop per day, and nothing
+ * goes out during quiet hours. The plan also decides whether the shop sees its
+ * customers' email and phone in full or masked.
  */
 class ShopPushService
 {
@@ -96,6 +100,9 @@ class ShopPushService
                 'limit' => $sendLimit,
                 'used' => $sendsUsed,
             ],
+            // How many notifications one customer can get from this shop a month.
+            'perCustomer' => ['limit' => $plan?->push_per_customer_per_month],
+            'customerDetails' => $plan?->showsFullCustomerDetails() ? 'full' : 'masked',
             'audiences' => $audiences,
             'recent' => $business->hasMany(ShopPushCampaign::class)->latest('id')->limit(10)->get()
                 ->map(fn (ShopPushCampaign $c) => [
@@ -114,7 +121,11 @@ class ShopPushService
      * Send a notification to (up to `limit` of) an audience. The delivery runs
      * after the response, so it needs no queue worker.
      *
-     * @param  array{audience: string, title: string, body?: ?string, link?: ?string, limit?: ?int}  $data
+     * Customers who already got the plan's per-customer number this month are
+     * skipped. With `customerIds` only those customers (within the audience)
+     * get it.
+     *
+     * @param  array{audience: string, title: string, body?: ?string, link?: ?string, limit?: ?int, customerIds?: ?list<string>}  $data
      */
     public function send(Business $business, User $actor, array $data): ShopPushCampaign
     {
@@ -131,10 +142,18 @@ class ShopPushService
         // Newest connections first; capped by the owner's choice and the quota left.
         $cap = $reachLimit === null ? PHP_INT_MAX : $reachLimit - $reachUsed;
         $take = min($cap, (int) ($data['limit'] ?? PHP_INT_MAX));
-        $users = $this->audienceQuery($business, $data['audience'])->latest('id')->limit($take)->get(['id']);
+        $picked = $data['customerIds'] ?? null;
+        $users = $this->audienceQuery($business, $data['audience'])
+            ->tap(fn ($q) => $this->skipCapped($q, $business, $plan?->push_per_customer_per_month))
+            ->when(! empty($picked), fn ($q) => $q->whereIn('uuid', $picked))
+            ->latest('id')->limit($take)->get(['id']);
 
         if ($users->isEmpty()) {
-            throw ValidationException::withMessages(['push' => ['Nobody in this group yet.']]);
+            throw ValidationException::withMessages(['push' => [
+                $this->audienceQuery($business, $data['audience'])->exists()
+                    ? 'These customers already got all the notifications your plan allows this month.'
+                    : 'Nobody in this group yet.',
+            ]]);
         }
 
         $campaign = ShopPushCampaign::create([
@@ -148,9 +167,115 @@ class ShopPushService
             'created_by' => $actor->id,
         ]);
 
+        // Who it went to, for the per-customer monthly cap.
+        $now = now();
+        foreach ($users->pluck('id')->chunk(500) as $chunk) {
+            DB::table('shop_push_recipients')->insert($chunk->map(fn (int $id) => [
+                'campaign_id' => $campaign->id,
+                'business_id' => $business->id,
+                'user_id' => $id,
+                'created_at' => $now,
+            ])->values()->all());
+        }
+
         SendShopPush::dispatchAfterResponse($campaign->id, $users->pluck('id')->all());
 
         return $campaign;
+    }
+
+    /**
+     * One page of an audience's customers for the notify screen: name, email
+     * and phone (masked unless the plan shows them in full), whether they get
+     * it on a phone, and how many notifications they got from the shop this
+     * month. In masked mode the search only looks at names, so it can't be
+     * used to guess a hidden email or number.
+     *
+     * @return array{customers: list<array<string, mixed>>, page: int, lastPage: int, total: int}
+     */
+    public function customers(Business $business, string $audience, ?string $search = null, int $page = 1, int $perPage = 30): array
+    {
+        $plan = $business->currentPlan();
+        $full = (bool) $plan?->showsFullCustomerDetails();
+        $cap = $plan?->push_per_customer_per_month;
+        $search = trim((string) $search);
+
+        $paginator = $this->audienceQuery($business, $audience)
+            ->select(['id', 'uuid', 'name', 'email', 'phone'])
+            ->addSelect(['sent_this_month' => $this->receiptsThisMonth($business)
+                ->selectRaw('count(*)')
+                ->whereColumn('shop_push_recipients.user_id', 'users.id')])
+            ->withExists('deviceTokens as on_phone')
+            ->when($search !== '', function ($q) use ($search, $full) {
+                $like = '%'.addcslashes($search, '%_\\').'%';
+                $q->where(fn ($w) => $w->where('name', 'like', $like)
+                    ->when($full, fn ($w) => $w->orWhere('email', 'like', $like)->orWhere('phone', 'like', $like)));
+            })
+            ->latest('id')
+            ->paginate($perPage, page: max(1, $page));
+
+        return [
+            'customers' => collect($paginator->items())->map(fn (User $u) => [
+                'id' => $u->uuid,
+                'name' => $u->name,
+                'email' => $full ? $u->email : self::maskEmail($u->email),
+                'phone' => $full ? $u->phone : self::maskPhone($u->phone),
+                'onPhone' => (bool) $u->on_phone,
+                'sentThisMonth' => (int) $u->sent_this_month,
+                'capped' => $cap !== null && (int) $u->sent_this_month >= $cap,
+            ])->values()->all(),
+            'page' => $paginator->currentPage(),
+            'lastPage' => $paginator->lastPage(),
+            'total' => $paginator->total(),
+        ];
+    }
+
+    /** "rahul.k@gmail.com" -> "ra*****@gmail.com" */
+    public static function maskEmail(?string $email): ?string
+    {
+        if ($email === null || $email === '') {
+            return null;
+        }
+        if (! str_contains($email, '@')) {
+            return str_repeat('*', 6);
+        }
+        [$local, $domain] = explode('@', $email, 2);
+        $keep = mb_strlen($local) > 3 ? 2 : 1;
+
+        return mb_substr($local, 0, $keep).str_repeat('*', max(3, mb_strlen($local) - $keep)).'@'.$domain;
+    }
+
+    /** "9876543210" -> "98******10" */
+    public static function maskPhone(?string $phone): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $phone);
+        if ($digits === '') {
+            return null;
+        }
+        if (strlen($digits) <= 4) {
+            return str_repeat('*', strlen($digits));
+        }
+
+        return substr($digits, 0, 2).str_repeat('*', strlen($digits) - 4).substr($digits, -2);
+    }
+
+    /** Leave out customers who already got `$cap` notifications from the shop this month. */
+    private function skipCapped(Builder $query, Business $business, ?int $cap): void
+    {
+        if ($cap === null) {
+            return;
+        }
+
+        $query->whereNotIn('id', $this->receiptsThisMonth($business)
+            ->select('user_id')
+            ->groupBy('user_id')
+            ->havingRaw('count(*) >= ?', [$cap]));
+    }
+
+    private function receiptsThisMonth(Business $business): QueryBuilder
+    {
+        return DB::table('shop_push_recipients')
+            ->where('shop_push_recipients.business_id', $business->id)
+            ->where('shop_push_recipients.created_at', '>=', $this->localStartOf('month'));
     }
 
     /** Why the shop can't send right now, or null when it can. */

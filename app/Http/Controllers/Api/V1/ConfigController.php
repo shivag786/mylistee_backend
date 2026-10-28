@@ -67,6 +67,8 @@ class ConfigController extends Controller
             'auth' => [
                 'google' => (bool) $this->settings->get('loginGoogle', true),
                 'mobile' => (bool) $this->settings->get('loginMobile', false),
+                // "Forgot PIN?" by a WhatsApp code — only when an OTP template is set.
+                'whatsappOtp' => app(\App\Services\WhatsApp\WhatsAppOtpService::class)->available(),
             ],
             // So the home page can say what coins are worth in rupees.
             'coins' => [

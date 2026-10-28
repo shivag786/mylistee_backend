@@ -39,6 +39,7 @@ class Plan extends Model
         'max_push_per_month',
         'push_reach_per_month',
         'push_per_customer_per_month',
+        'whatsapp_per_month',
         'customer_details',
         'max_offer_days',
         'max_qr_codes',
@@ -70,6 +71,7 @@ class Plan extends Model
             'max_push_per_month' => 'integer',
             'push_reach_per_month' => 'integer',
             'push_per_customer_per_month' => 'integer',
+            'whatsapp_per_month' => 'integer',
             'max_offer_days' => 'integer',
             'max_qr_codes' => 'integer',
             'max_gallery_images' => 'integer',
@@ -121,6 +123,10 @@ class Plan extends Model
     public function moduleConfig(string $module): array
     {
         if ($this->modules === null) {
+            // WhatsApp costs per message: never on for a plan nobody has set up.
+            if ($module === 'whatsapp') {
+                return ['on' => false, 'days' => null];
+            }
             $legacy = ['store_mode' => 'store_mode', 'notifications' => 'push_notifications'][$module] ?? null;
 
             return ['on' => $legacy === null || in_array($legacy, $this->features ?? [], true), 'days' => null];

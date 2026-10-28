@@ -17,6 +17,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\Reward;
 use App\Models\User;
+use App\Services\WhatsApp\WhatsAppEventService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -39,6 +40,7 @@ class OrderService
         private readonly RewardService $rewards,
         private readonly PlatformFeeService $fees,
         private readonly OrderAlertService $alerts,
+        private readonly WhatsAppEventService $whatsapp,
     ) {}
 
     /**
@@ -280,6 +282,7 @@ class OrderService
                 "Order {$order->token} at {$order->business->name} is ready. {$where}",
                 ['link' => '/orders'],
             );
+            $this->whatsapp->order('order_ready', $order);
         }
 
         return $order->fresh('items');
@@ -578,6 +581,7 @@ class OrderService
                 "{$order->business->name} accepted your order {$order->token} and is preparing it.",
                 ['link' => '/orders'],
             );
+            $this->whatsapp->order('order_accepted', $order);
         }
     }
 
@@ -593,6 +597,7 @@ class OrderService
                 "Your order {$order->token} at {$order->business->name} is complete. Thank you!",
                 ['link' => '/orders'],
             );
+            $this->whatsapp->order('order_completed', $order);
         }
     }
 
@@ -663,6 +668,7 @@ class OrderService
                 "Your order {$order->token} at {$order->business->name} was cancelled.",
                 ['link' => '/wallet'],
             );
+            $this->whatsapp->order('order_cancelled', $order);
         }
     }
 

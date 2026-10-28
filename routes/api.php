@@ -118,6 +118,13 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         ->middleware('throttle:300,1')
         ->name('webhooks.razorpay');
 
+    // Interakt (WhatsApp) webhook: delivery status, template approval, STOP replies.
+    // The HMAC signature is the authentication (see InteraktWebhookController).
+    Route::post('webhooks/interakt', \App\Http\Controllers\Api\V1\Webhooks\InteraktWebhookController::class)
+        ->withoutMiddleware('throttle:api')
+        ->middleware('throttle:600,1')
+        ->name('webhooks.interakt');
+
     // Auth (document/phase/12 §Firebase Login Flow)
     Route::prefix('auth')->group(function (): void {
         Route::post('google', [AuthController::class, 'google'])
@@ -137,6 +144,14 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::post('register-owner', [AuthController::class, 'registerOwner'])
             ->middleware('throttle:10,1')
             ->name('auth.register-owner');
+
+        // Forgot PIN: a code on WhatsApp, then a new PIN (only while the admin set an OTP template).
+        Route::post('pin/forgot', [\App\Http\Controllers\Api\V1\PinResetController::class, 'send'])
+            ->middleware('throttle:5,1')
+            ->name('auth.pin.forgot');
+        Route::post('pin/reset', [\App\Http\Controllers\Api\V1\PinResetController::class, 'reset'])
+            ->middleware('throttle:10,1')
+            ->name('auth.pin.reset');
 
         // Local-only helper for verifying the app without Firebase creds.
         if (! App::environment('production')) {
@@ -357,6 +372,11 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('push', [PushCampaignController::class, 'store'])
                 ->middleware('throttle:10,1')->name('push.store');
 
+            // WhatsApp offers: admin-approved templates sent to the shop's customers (plan-capped).
+            Route::get('whatsapp', [\App\Http\Controllers\Api\V1\Business\WhatsAppCampaignController::class, 'show'])->name('whatsapp.show');
+            Route::post('whatsapp', [\App\Http\Controllers\Api\V1\Business\WhatsAppCampaignController::class, 'store'])
+                ->middleware('throttle:5,1')->name('whatsapp.store');
+
             Route::get('qr', [QrController::class, 'show'])->name('qr.show');
             Route::post('qr/download', [QrController::class, 'download'])->name('qr.download');
 
@@ -496,6 +516,19 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::put('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'update'])->name('vendor-app-theme.update');
             Route::delete('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'reset'])->name('vendor-app-theme.reset');
             Route::put('settings', [SettingController::class, 'update'])->name('settings.update');
+
+            // WhatsApp through Interakt: connection, templates, automatic messages, message log.
+            Route::prefix('whatsapp')->name('whatsapp.')->controller(\App\Http\Controllers\Api\V1\Admin\WhatsAppController::class)->group(function (): void {
+                Route::get('/', 'show')->name('show');
+                Route::put('/', 'update')->name('update');
+                Route::post('test-connection', 'testConnection')->middleware('throttle:10,1')->name('test-connection');
+                Route::post('sync', 'sync')->middleware('throttle:10,1')->name('sync');
+                Route::get('messages', 'messages')->name('messages');
+                Route::post('templates', 'storeTemplate')->middleware('throttle:20,1')->name('templates.store');
+                Route::patch('templates/{uuid}', 'updateTemplate')->name('templates.update');
+                Route::delete('templates/{uuid}', 'destroyTemplate')->name('templates.destroy');
+                Route::post('templates/{uuid}/test', 'testTemplate')->middleware('throttle:10,1')->name('templates.test');
+            });
             Route::post('settings/test-email', [SettingController::class, 'testEmail'])
                 ->middleware('throttle:5,1')
                 ->name('settings.test-email');

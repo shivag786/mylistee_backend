@@ -6,6 +6,7 @@ use App\Enums\NotificationType;
 use App\Enums\ServiceType;
 use App\Models\Order;
 use App\Models\User;
+use App\Services\WhatsApp\WhatsAppEventService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -19,11 +20,18 @@ use Illuminate\Support\Facades\DB;
  */
 class OrderAlertService
 {
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly WhatsAppEventService $whatsapp,
+    ) {}
 
     /** @param  string|null  $paymentLine  e.g. "₹200 paid online in full." */
     public function newOrder(Order $order, ?string $paymentLine = null): void
     {
+        // WhatsApp both ways, when the admin set templates for them.
+        $this->whatsapp->order('order_placed_owner', $order);
+        $this->whatsapp->order('order_placed', $order);
+
         $order->loadMissing(['business.owner', 'customer:id,name', 'items', 'diningTable']);
         $owner = $order->business?->owner;
         if ($owner === null) {

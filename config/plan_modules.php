@@ -25,6 +25,8 @@ return [
     'redeem' => ['name' => 'Redeem', 'description' => 'Redeem reward PINs at the counter', 'group' => 'Bring customers back', 'paths' => ['redeem', 'redemptions', 'token']],
     // Checked when sending (ShopPushService), which explains why it is blocked.
     'notifications' => ['name' => 'Notify customers', 'description' => 'Push offers to followers and customers', 'group' => 'Bring customers back', 'paths' => []],
+    // Checked when sending (WhatsAppCampaignService); the monthly count is plans.whatsapp_per_month.
+    'whatsapp' => ['name' => 'WhatsApp offers', 'description' => 'Send ready-made offer templates on WhatsApp', 'group' => 'Bring customers back', 'paths' => []],
     'customers' => ['name' => 'Customers', 'description' => 'The shop\'s own customer list', 'group' => 'Know your customers', 'paths' => ['customers']],
     'reviews' => ['name' => 'Review replies', 'description' => 'Reply to and hide reviews', 'group' => 'Know your customers', 'paths' => ['reviews']],
     'analytics' => ['name' => 'Analytics', 'description' => 'Sales and visit insights', 'group' => 'Know your customers', 'paths' => ['analytics'], 'readLocked' => true],

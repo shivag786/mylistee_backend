@@ -26,4 +26,5 @@ return [
     'reviews' => ['name' => 'Reviews', 'description' => 'Customer reviews, replies and the shareable review link'],
     'qr' => ['name' => 'QR code', 'description' => 'Business QR code'],
     'notifications' => ['name' => 'Notify customers', 'description' => 'Push notifications to followers and customers (monthly reach set per plan)'],
+    'whatsapp' => ['name' => 'WhatsApp offers', 'description' => 'Ready-made WhatsApp offer templates sent to customers (monthly messages set per plan)'],
 ];

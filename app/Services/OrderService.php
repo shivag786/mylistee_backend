@@ -171,8 +171,10 @@ class OrderService
 
     /**
      * A walk-in order the shop takes at the counter. Priced like any order (the
-     * shop's bill discount applies) but there is no customer account: no coins,
-     * no coupons, and the name said at the counter goes in `customer_label`.
+     * shop's bill discount applies); no coins, and the name said at the counter
+     * goes in `customer_label`. The customer's mobile is kept on the order and,
+     * when it belongs to a Listee account, links the order to it so the shop's
+     * coupons for that customer can be applied and loyalty counts the visit.
      * The shop took it, so it starts accepted and goes to the kitchen; paid
      * straight away when [$paidWith] is given. Taken even with online orders
      * paused — the customer is standing there.
@@ -191,6 +193,8 @@ class OrderService
         ?string $customerLabel = null,
         ?string $serviceAddress = null,
         ?PaymentMethod $paidWith = null,
+        ?string $customerPhone = null,
+        ?string $couponCode = null,
     ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Add at least one item.']]);
@@ -198,12 +202,15 @@ class OrderService
 
         [$serviceType, $table, $serviceAddress] = $this->resolveService($business, $serviceType, $tableUuid, $serviceAddress);
         $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
+        $phone = $this->counterPhone($customerPhone);
+        $customer = $this->customerByPhone($phone);
 
-        $order = DB::transaction(function () use ($business, $items, $serviceType, $table, $serviceAddress, $deliveryFee, $note, $customerLabel): Order {
+        $order = DB::transaction(function () use ($business, $items, $serviceType, $table, $serviceAddress, $deliveryFee, $note, $customerLabel, $phone, $customer, $couponCode): Order {
             $priced = $this->priceItems($business, $items);
             $subtotal = $priced['subtotal'];
-            ['billDiscount' => $billDiscount] = $this->discounts($business, null, $subtotal, null);
-            $total = round($subtotal - $billDiscount + $deliveryFee, 2);
+            ['billDiscount' => $billDiscount, 'coupon' => $coupon, 'couponDiscount' => $couponDiscount]
+                = $this->discounts($business, $customer, $subtotal, $couponCode);
+            $total = round($subtotal - $billDiscount - $couponDiscount + $deliveryFee, 2);
             $fees = $this->fees->split($total, 0.0);
             $stockTaken = $this->stock->deduct($priced['stockNeeds']);
             $now = Carbon::now();
@@ -211,7 +218,7 @@ class OrderService
             $order = Order::create([
                 'token' => $this->uniqueToken($business),
                 'business_id' => $business->id,
-                'customer_id' => null,
+                'customer_id' => $customer?->id,
                 'source' => 'counter',
                 'customer_label' => $customerLabel !== null && trim($customerLabel) !== '' ? trim($customerLabel) : null,
                 'table_id' => $table?->id,
@@ -226,7 +233,8 @@ class OrderService
                 'service_type' => $serviceType,
                 'subtotal' => $subtotal,
                 'bill_discount' => $billDiscount,
-                'coupon_discount' => 0,
+                'coupon_id' => $coupon?->id,
+                'coupon_discount' => $couponDiscount,
                 'coins_used' => 0,
                 'coin_discount' => 0,
                 'total' => $total,
@@ -235,12 +243,21 @@ class OrderService
                 'stock_deducted' => $stockTaken === [] ? null : $stockTaken,
                 'note' => $note,
                 'service_address' => $serviceAddress,
+                'delivery_phone' => $phone,
                 'placed_at' => $now,
                 'confirmed_at' => $now,
             ]);
 
             foreach ($priced['lines'] as $line) {
                 $order->items()->create($line);
+            }
+
+            if ($coupon !== null) {
+                if ($customer !== null) {
+                    $this->rewards->redeem($coupon, $order, $customer, $couponDiscount);
+                } else {
+                    $coupon->increment('used_count');
+                }
             }
 
             return $order;
@@ -251,6 +268,41 @@ class OrderService
         }
 
         return $order->load('items');
+    }
+
+    /**
+     * The counter cart priced for the customer at the counter: their coupons
+     * at this shop (picked out by mobile) and what one would save.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<string, mixed>
+     */
+    public function counterQuote(Business $business, array $items, ?string $customerPhone, ?string $couponCode, ?ServiceType $serviceType): array
+    {
+        $customer = $this->customerByPhone($this->counterPhone($customerPhone));
+
+        return $this->quote($business, $customer, $items, $couponCode, $serviceType) + [
+            'customer' => $customer ? ['name' => $customer->name, 'registered' => true] : null,
+        ];
+    }
+
+    /** A 10-digit Indian mobile from what was typed at the counter, or null. */
+    private function counterPhone(?string $raw): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $raw);
+        if ($digits === '') {
+            return null;
+        }
+        if (strlen($digits) > 10) {
+            $digits = substr($digits, -10);
+        }
+
+        return strlen($digits) === 10 ? $digits : null;
+    }
+
+    private function customerByPhone(?string $phone): ?User
+    {
+        return $phone === null ? null : User::where('phone', $phone)->first();
     }
 
     /**

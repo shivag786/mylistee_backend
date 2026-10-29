@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Business;
 use App\Models\Coupon;
+use App\Models\FeatureFlag;
 use App\Models\CouponRedemption;
 use App\Models\Order;
 use App\Models\RewardRule;
@@ -23,6 +24,16 @@ use Illuminate\Validation\ValidationException;
  */
 class RewardService
 {
+    /**
+     * The admin's "Rewards & coupons" switch (`owner_rewards`). Off: no shop's
+     * bill discount, come-back or loyalty coupons, or coupon codes apply or show
+     * anywhere — coins are a separate switch (LoyaltyService::isEnabled).
+     */
+    public function enabled(): bool
+    {
+        return FeatureFlag::isEnabled('owner_rewards', true);
+    }
+
     public function settingsFor(Business $business): ShopRewardSetting
     {
         return ShopRewardSetting::firstOrNew(['business_id' => $business->id]);
@@ -72,6 +83,10 @@ class RewardService
             'comeback' => $clean + [
                 'min_bill' => isset($rule['min_bill']) && (float) $rule['min_bill'] > 0 ? round((float) $rule['min_bill'], 2) : null,
                 'days' => max(1, min(90, (int) ($rule['days'] ?? 15))),
+            ],
+            // The earned coupon works on a bill of at least this much (optional).
+            'loyalty_step' => $clean + [
+                'min_bill' => isset($rule['min_bill']) && (float) $rule['min_bill'] > 0 ? round((float) $rule['min_bill'], 2) : null,
             ],
             default => $clean,
         };
@@ -211,6 +226,9 @@ class RewardService
     /** The automatic discount on a bill of `$subtotal` (0 below the minimum). */
     public function billDiscount(Business $business, float $subtotal): float
     {
+        if (! $this->enabled()) {
+            return 0.0;
+        }
         $rule = $this->settingsFor($business)->bill_discount;
         if (! $rule || $subtotal < (float) $rule['min_bill']) {
             return 0.0;
@@ -226,6 +244,9 @@ class RewardService
      */
     public function billNudge(Business $business, float $subtotal): ?array
     {
+        if (! $this->enabled()) {
+            return null;
+        }
         $rule = $this->settingsFor($business)->bill_discount;
         if (! $rule || $subtotal >= (float) $rule['min_bill']) {
             return null;
@@ -246,6 +267,9 @@ class RewardService
      */
     public function couponsFor(Business $business, ?User $customer): Collection
     {
+        if (! $this->enabled()) {
+            return collect();
+        }
         return Coupon::where('business_id', $business->id)
             ->where('active', true)
             ->where(fn ($q) => $q->whereNull('customer_id')->when($customer, fn ($q) => $q->orWhere('customer_id', $customer->id)))
@@ -271,6 +295,9 @@ class RewardService
     public function couponForCheckout(Business $business, ?User $customer, string $code, float $subtotal): Coupon
     {
         $fail = fn (string $message) => throw ValidationException::withMessages(['couponCode' => [$message]]);
+        if (! $this->enabled()) {
+            $fail('Coupons aren’t available right now.');
+        }
 
         $coupon = Coupon::where('business_id', $business->id)->where('code', Str::upper(trim($code)))->first();
         if ($coupon === null || ($coupon->customer_id !== null && $coupon->customer_id !== $customer?->id)) {
@@ -332,7 +359,7 @@ class RewardService
     public function issueAfterPaid(Order $order): array
     {
         $customer = $order->customer;
-        if ($customer === null) {
+        if ($customer === null || ! $this->enabled()) {
             return [];
         }
         $business = $order->business;
@@ -395,6 +422,9 @@ class RewardService
      */
     public function perks(Business $business, ?User $customer): array
     {
+        if (! $this->enabled()) {
+            return ['billDiscount' => null, 'comeback' => null, 'loyalty' => null, 'coupons' => []];
+        }
         $setting = $this->settingsFor($business);
         $bill = $setting->bill_discount;
         $comeback = $setting->comeback;
@@ -431,7 +461,9 @@ class RewardService
 
         $steps = array_map(fn (array $step) => [
             'at' => (int) $step['at'],
-            'label' => RewardRule::label($step['type'], (float) $step['value'], $step['max_off'] ?? null),
+            'label' => RewardRule::label($step['type'], (float) $step['value'], $step['max_off'] ?? null)
+                .(! empty($step['min_bill']) ? ' on ₹'.RewardRule::money((float) $step['min_bill']).'+' : ''),
+            'minBill' => ! empty($step['min_bill']) ? (float) $step['min_bill'] : null,
             'reached' => $finished || ($where !== null && $position >= (int) $step['at']),
         ], $loyalty['steps']);
 
@@ -479,6 +511,9 @@ class RewardService
     /** One line for shop cards in lists: the strongest pull, or null. */
     public function headline(?ShopRewardSetting $setting): ?string
     {
+        if (! $this->enabled()) {
+            return null;
+        }
         if ($setting === null) {
             return null;
         }

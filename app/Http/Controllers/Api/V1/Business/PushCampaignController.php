@@ -34,12 +34,37 @@ class PushCampaignController extends Controller
             'audience' => ['sometimes', Rule::in(array_keys(ShopPushService::AUDIENCES))],
             'search' => ['nullable', 'string', 'max:80'],
             'page' => ['sometimes', 'integer', 'min:1'],
+            'perPage' => ['sometimes', 'integer', 'min:5', 'max:50'],
         ]);
 
         return ApiResponse::success(
-            $this->push->customers($business, $data['audience'] ?? 'everyone', $data['search'] ?? null, (int) ($data['page'] ?? 1)),
+            $this->push->customers(
+                $business,
+                $data['audience'] ?? 'everyone',
+                $data['search'] ?? null,
+                (int) ($data['page'] ?? 1),
+                (int) ($data['perPage'] ?? 30),
+            ),
             'Customers.',
         );
+    }
+
+    /** GET /business/push/{uuid}/recipients?page=&perPage= -- who a sent notification went to. */
+    public function recipients(Request $request, string $uuid): JsonResponse
+    {
+        $business = $this->business($request);
+
+        $data = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'perPage' => ['sometimes', 'integer', 'min:5', 'max:50'],
+        ]);
+
+        $result = $this->push->recipients($business, $uuid, (int) ($data['page'] ?? 1), (int) ($data['perPage'] ?? 10));
+        if ($result === null) {
+            return ApiResponse::error('Notification not found.', status: 404);
+        }
+
+        return ApiResponse::success($result, 'Recipients.');
     }
 
     /** POST /business/push */

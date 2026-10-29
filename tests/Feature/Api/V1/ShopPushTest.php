@@ -233,4 +233,43 @@ class ShopPushTest extends TestCase
             'link' => 'https://evil.example',
         ])->assertStatus(422)->assertJsonValidationErrors('link');
     }
+
+    public function test_the_owner_sees_who_a_sent_notification_went_to(): void
+    {
+        $this->enable();
+        [$owner, $business] = $this->shop();
+        $followers = collect(range(1, 12))->map(fn () => $this->customer());
+        foreach ($followers as $f) {
+            Favorite::create(['customer_id' => $f->id, 'business_id' => $business->id]);
+        }
+
+        $id = $this->token($owner)->postJson('/api/v1/business/push', ['audience' => 'followers', 'title' => 'Hello'])
+            ->assertCreated()->json('data.id');
+
+        $this->token($owner)->getJson("/api/v1/business/push/{$id}/recipients")
+            ->assertOk()
+            ->assertJsonPath('data.campaign.title', 'Hello')
+            ->assertJsonPath('data.campaign.recipients', 12)
+            ->assertJsonPath('data.total', 12)
+            ->assertJsonPath('data.lastPage', 2)
+            ->assertJsonCount(10, 'data.people');
+
+        $this->token($owner)->getJson("/api/v1/business/push/{$id}/recipients?page=2")
+            ->assertOk()->assertJsonCount(2, 'data.people');
+
+        // Another shop can't look.
+        [$other] = $this->shop();
+        $this->token($other)->getJson("/api/v1/business/push/{$id}/recipients")->assertNotFound();
+    }
+
+    public function test_customer_lists_come_ten_at_a_time(): void
+    {
+        [$owner, $business] = $this->shop();
+        foreach (range(1, 13) as $_) {
+            Favorite::create(['customer_id' => $this->customer()->id, 'business_id' => $business->id]);
+        }
+
+        $this->token($owner)->getJson('/api/v1/business/push/customers?audience=followers&perPage=10')
+            ->assertOk()->assertJsonCount(10, 'data.customers')->assertJsonPath('data.total', 13);
+    }
 }

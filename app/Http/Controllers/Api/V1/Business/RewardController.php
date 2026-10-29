@@ -82,6 +82,7 @@ class RewardController extends Controller
                 'loyalty.steps.*.type' => ['required', Rule::in(['percent', 'flat'])],
                 'loyalty.steps.*.value' => ['required', 'numeric', 'min:1', 'max:100000'],
                 'loyalty.steps.*.max_off' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+                'loyalty.steps.*.min_bill' => ['nullable', 'numeric', 'min:0', 'max:1000000'],
             ],
         ), [
             'loyalty.steps.*.at.distinct' => 'Each loyalty step needs its own order number.',

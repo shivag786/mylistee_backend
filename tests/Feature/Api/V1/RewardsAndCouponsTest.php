@@ -265,4 +265,51 @@ class RewardsAndCouponsTest extends TestCase
 
         $this->assertSame(['platform' => 10.0, 'gateway' => 10.0, 'vendor' => 480.0], $fees);
     }
+
+    public function test_a_loyalty_step_can_ask_for_a_minimum_bill(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $customer = $this->customer();
+
+        $this->token($owner)->putJson('/api/v1/business/rewards', [
+            'bill_discount' => null,
+            'comeback' => null,
+            'loyalty' => ['repeat' => false, 'steps' => [
+                ['at' => 1, 'type' => 'flat', 'value' => 40, 'min_bill' => 300],
+            ]],
+        ])->assertOk()->assertJsonPath('data.loyalty.steps.0.min_bill', 300);
+
+        $this->markPaid($owner, $this->order($customer, $business, $product, 1)->json('data.id'));
+
+        $coupon = Coupon::where('customer_id', $customer->id)->where('kind', 'loyalty')->sole();
+        $this->assertSame(300.0, (float) $coupon->min_bill);
+        // ₹250 is under the ₹300 the step asks for.
+        $this->order($customer, $business, $product, 1, $coupon->code)->assertUnprocessable();
+        $this->order($customer, $business, $product, 2, $coupon->code)->assertCreated()->assertJsonPath('data.couponDiscount', 40);
+
+        $card = $this->token($customer)->getJson("/api/v1/businesses/{$business->slug}")->json('data.perks.loyalty');
+        $this->assertSame('₹40 off on ₹300+', $card['steps'][0]['label']);
+    }
+
+    public function test_the_admin_switches_rewards_and_coins_off_separately(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $customer = $this->customer();
+        $this->setUpRewards($owner);
+
+        \App\Models\FeatureFlag::updateOrCreate(['key' => 'owner_rewards'], ['name' => 'Rewards', 'enabled' => false]);
+        \App\Models\FeatureFlag::updateOrCreate(['key' => 'owner_loyalty'], ['name' => 'Coins', 'enabled' => true]);
+
+        // Rewards off: no bill discount, no perks on the shop page.
+        $this->order($customer, $business, $product, 2)->assertCreated()->assertJsonPath('data.billDiscount', 0);
+        $perks = $this->token($customer)->getJson("/api/v1/businesses/{$business->slug}")->json('data.perks');
+        $this->assertNull($perks['billDiscount']);
+        $this->assertSame([], $perks['coupons']);
+        $this->getJson('/api/v1/config')->assertJsonPath('data.rewardsEnabled', false)->assertJsonPath('data.coins.enabled', true);
+
+        // Coins off is its own switch.
+        \App\Models\FeatureFlag::where('key', 'owner_loyalty')->update(['enabled' => false]);
+        $this->assertFalse(app(\App\Services\LoyaltyService::class)->isEnabled());
+        $this->getJson('/api/v1/config')->assertJsonPath('data.coins.enabled', false);
+    }
 }

@@ -33,6 +33,9 @@ class User extends Authenticatable
         'firebase_uid',
         'avatar_url',
         'phone',
+        'dob',
+        'gender',
+        'anniversary',
         'pin',
         'pin_plain',
         'role',
@@ -87,6 +90,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'dob' => 'date',
+            'anniversary' => 'date',
             'password' => 'hashed',
             'role' => UserRole::class,
             'status' => UserStatus::class,
@@ -150,6 +155,12 @@ class User extends Authenticatable
     public function spins(): HasMany
     {
         return $this->hasMany(Spin::class, 'customer_id');
+    }
+
+    /** People this customer celebrates (family, friends). @return HasMany<CustomerPerson, $this> */
+    public function people(): HasMany
+    {
+        return $this->hasMany(CustomerPerson::class);
     }
 
     /** @return HasMany<Favorite, $this> */

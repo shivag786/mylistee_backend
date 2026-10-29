@@ -38,6 +38,10 @@ class LoyaltyService
         if (! (bool) config('loyalty.enabled', true)) {
             return false;
         }
+        // The admin's "Loyalty coins" switch, separate from rewards & coupons.
+        if (! \App\Models\FeatureFlag::isEnabled('owner_loyalty', true)) {
+            return false;
+        }
 
         if ($business !== null) {
             $program = $business->loyaltyProgram;

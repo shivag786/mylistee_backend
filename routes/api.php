@@ -182,6 +182,14 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             ->middleware('throttle:30,1')
             ->name('spinner.spin');
 
+        // Customer profile: mobile, birthday, gender, anniversary + people they celebrate.
+        Route::get('profile', [\App\Http\Controllers\Api\V1\ProfileController::class, 'show'])->name('profile.show');
+        Route::put('profile', [\App\Http\Controllers\Api\V1\ProfileController::class, 'update'])->name('profile.update');
+        Route::post('profile/people', [\App\Http\Controllers\Api\V1\ProfileController::class, 'storePerson'])
+            ->middleware('throttle:30,1')->name('profile.people.store');
+        Route::put('profile/people/{uuid}', [\App\Http\Controllers\Api\V1\ProfileController::class, 'updatePerson'])->name('profile.people.update');
+        Route::delete('profile/people/{uuid}', [\App\Http\Controllers\Api\V1\ProfileController::class, 'destroyPerson'])->name('profile.people.destroy');
+
         Route::get('wallet', [WalletController::class, 'index'])->name('wallet.index');
         Route::get('wallet/rewards', [WalletController::class, 'rewards'])->name('wallet.rewards');
 
@@ -330,6 +338,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('orders', [OwnerOrderController::class, 'index'])->name('orders.index');
             // Walk-in orders taken at the counter (vendor app).
             Route::post('orders', [OwnerOrderController::class, 'store'])->name('orders.store');
+            Route::post('orders/quote', [OwnerOrderController::class, 'quote'])->name('orders.quote');
+            Route::get('walk-ins', [OwnerOrderController::class, 'walkIns'])->name('walk-ins');
             Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
             // Kitchen screen: queued -> preparing -> ready, and the shop's switch.
             Route::patch('orders/{uuid}/kitchen', [OwnerOrderController::class, 'kitchen'])->name('orders.kitchen');
@@ -369,6 +379,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Notify customers (push to followers / past customers, plan-capped).
             Route::get('push', [PushCampaignController::class, 'show'])->name('push.show');
             Route::get('push/customers', [PushCampaignController::class, 'customers'])->name('push.customers');
+            Route::get('push/{uuid}/recipients', [PushCampaignController::class, 'recipients'])->name('push.recipients');
             Route::post('push', [PushCampaignController::class, 'store'])
                 ->middleware('throttle:10,1')->name('push.store');
 

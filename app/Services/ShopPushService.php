@@ -32,6 +32,7 @@ class ShopPushService
         'followers' => 'Followers',
         'customers' => 'Ordered from you',
         'lapsed' => "Haven't ordered in 30 days",
+        'occasions' => 'Birthdays & anniversaries this week',
     ];
 
     /** No pushes between these local hours (22:00 → 08:00). */
@@ -59,7 +60,12 @@ class ShopPushService
                     ->where('created_at', '>=', now()->subDays(30))))
             ->when($audience === 'everyone', fn ($q) => $q->where(fn ($w) => $w
                 ->whereIn('id', $followers)
-                ->orWhereIn('id', $ordered)));
+                ->orWhereIn('id', $ordered)))
+            // Followers and customers with their own or a saved person's
+            // birthday / anniversary in the next 7 days.
+            ->when($audience === 'occasions', fn ($q) => $q
+                ->where(fn ($w) => $w->whereIn('id', $followers)->orWhereIn('id', $ordered))
+                ->whereIn('id', app(OccasionService::class)->customerIdsWithOccasionSoon(7)));
     }
 
     /**
@@ -222,6 +228,50 @@ class ShopPushService
                 'onPhone' => (bool) $u->on_phone,
                 'sentThisMonth' => (int) $u->sent_this_month,
                 'capped' => $cap !== null && (int) $u->sent_this_month >= $cap,
+            ])->values()->all(),
+            'page' => $paginator->currentPage(),
+            'lastPage' => $paginator->lastPage(),
+            'total' => $paginator->total(),
+        ];
+    }
+
+    /**
+     * One sent notification and the people it went to, a page at a time.
+     * Contact details follow the plan, as in [customers].
+     *
+     * @return array<string, mixed>|null null when the shop has no such notification
+     */
+    public function recipients(Business $business, string $uuid, int $page = 1, int $perPage = 10): ?array
+    {
+        $campaign = ShopPushCampaign::where('business_id', $business->id)->where('uuid', $uuid)->first();
+        if ($campaign === null) {
+            return null;
+        }
+        $full = (bool) $business->currentPlan()?->showsFullCustomerDetails();
+
+        $paginator = User::query()
+            ->join('shop_push_recipients', 'shop_push_recipients.user_id', '=', 'users.id')
+            ->where('shop_push_recipients.campaign_id', $campaign->id)
+            ->select(['users.id', 'users.uuid', 'users.name', 'users.phone'])
+            ->withExists('deviceTokens as on_phone')
+            ->orderBy('shop_push_recipients.id')
+            ->paginate($perPage, page: max(1, $page));
+
+        return [
+            'campaign' => [
+                'id' => $campaign->uuid,
+                'title' => $campaign->title,
+                'body' => $campaign->body,
+                'audience' => self::AUDIENCES[$campaign->audience] ?? $campaign->audience,
+                'recipients' => $campaign->recipients,
+                'reachable' => $campaign->reachable,
+                'sentAt' => ($campaign->sent_at ?? $campaign->created_at)?->toIso8601String(),
+            ],
+            'people' => collect($paginator->items())->map(fn (User $u) => [
+                'id' => $u->uuid,
+                'name' => $u->name,
+                'phone' => $full ? $u->phone : self::maskPhone($u->phone),
+                'onPhone' => (bool) $u->on_phone,
             ])->values()->all(),
             'page' => $paginator->currentPage(),
             'lastPage' => $paginator->lastPage(),

@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Business;
 use App\Models\BusinessCategory;
+use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
@@ -198,5 +199,104 @@ class KitchenAndCounterTest extends TestCase
             'name' => $category->name,
             'business_type' => 'spaceship',
         ])->assertStatus(422);
+    }
+
+    public function test_a_counter_order_finds_the_customers_coupons_by_mobile(): void
+    {
+        [$owner, $business] = $this->shop();
+        $momos = $this->momos($business, 'Paneer Momos');
+        $customer = User::factory()->create(['phone' => '9876543210']);
+        Coupon::create(['business_id' => $business->id, 'kind' => 'code', 'code' => 'FLAT20', 'title' => '₹20 off', 'discount_type' => 'flat', 'value' => 20, 'active' => true]);
+        Coupon::create(['business_id' => $business->id, 'customer_id' => $customer->id, 'kind' => 'comeback', 'code' => 'BACK30', 'title' => '₹30 off', 'discount_type' => 'flat', 'value' => 30, 'per_customer_limit' => 1, 'active' => true]);
+        $items = [['type' => 'product', 'id' => $momos->uuid, 'variant' => 'f']];
+
+        $this->as($owner)->postJson('/api/v1/business/orders/quote', ['items' => $items, 'customerPhone' => '98765 43210'])
+            ->assertOk()
+            ->assertJsonPath('data.customer.name', $customer->name)
+            ->assertJsonCount(2, 'data.coupons');
+
+        // Someone without an account only sees the shop's open codes.
+        $this->as($owner)->postJson('/api/v1/business/orders/quote', ['items' => $items, 'customerPhone' => '9000000000'])
+            ->assertOk()
+            ->assertJsonPath('data.customer', null)
+            ->assertJsonCount(1, 'data.coupons');
+
+        $this->as($owner)->postJson('/api/v1/business/orders', [
+            'items' => $items,
+            'customerPhone' => '9876543210',
+            'couponCode' => 'BACK30',
+        ])->assertCreated()
+            ->assertJsonPath('data.total', 70)
+            ->assertJsonPath('data.couponDiscount', 30)
+            ->assertJsonPath('data.deliveryPhone', '9876543210');
+
+        $this->assertDatabaseHas('orders', ['business_id' => $business->id, 'customer_id' => $customer->id, 'source' => 'counter']);
+        $this->assertDatabaseHas('coupon_redemptions', ['customer_id' => $customer->id, 'amount' => 30]);
+    }
+
+    public function test_a_counter_order_rejects_a_bad_mobile(): void
+    {
+        [$owner, $business] = $this->shop();
+        $momos = $this->momos($business, 'Fried Momos');
+
+        $this->as($owner)->postJson('/api/v1/business/orders', [
+            'items' => [['type' => 'product', 'id' => $momos->uuid, 'variant' => 'h']],
+            'customerPhone' => '12345',
+        ])->assertUnprocessable()->assertJsonValidationErrors('customerPhone');
+    }
+
+    public function test_past_orders_filter_by_day_range(): void
+    {
+        [$owner, $business] = $this->shop();
+        $momos = $this->momos($business, 'Tandoori Momos');
+        $items = [['type' => 'product', 'id' => $momos->uuid, 'variant' => 'h']];
+
+        $this->travelTo(now()->subDays(10));
+        $old = $this->as($owner)->postJson('/api/v1/business/orders', ['items' => $items, 'paid' => 'cod'])->json('data.id');
+        $this->travelBack();
+        $new = $this->as($owner)->postJson('/api/v1/business/orders', ['items' => $items, 'paid' => 'cod'])->json('data.id');
+        Order::query()->update(['status' => 'completed']);
+
+        $zone = config('app.business_timezone');
+        $today = now($zone)->toDateString();
+        $this->as($owner)->getJson('/api/v1/business/orders?status=completed&from='.now($zone)->subDays(2)->toDateString().'&to='.$today)
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $new);
+
+        $this->as($owner)->getJson('/api/v1/business/orders?status=completed&from='.now($zone)->subDays(11)->toDateString().'&to='.now($zone)->subDays(9)->toDateString())
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $old);
+    }
+
+    public function test_walk_in_customers_are_listed_by_mobile(): void
+    {
+        [$owner, $business] = $this->shop();
+        $momos = $this->momos($business, 'Cheese Momos');
+        $items = [['type' => 'product', 'id' => $momos->uuid, 'variant' => 'h']];
+
+        foreach (['9811111111', '9811111111', '9822222222'] as $phone) {
+            $this->as($owner)->postJson('/api/v1/business/orders', ['items' => $items, 'customerPhone' => $phone, 'customerName' => 'Ravi'])
+                ->assertCreated();
+        }
+
+        $this->as($owner)->getJson('/api/v1/business/walk-ins')
+            ->assertOk()
+            ->assertJsonPath('data.total', 2)
+            ->assertJsonPath('data.customers.0.orders', 2)
+            ->assertJsonPath('data.customers.0.spent', 120)
+            ->assertJsonPath('data.customers.0.name', 'Ravi');
+    }
+
+    public function test_the_dashboard_counts_followers_and_orders(): void
+    {
+        [$owner, $business] = $this->shop();
+        $momos = $this->momos($business, 'Kurkure Momos');
+        $this->as($owner)->postJson('/api/v1/business/orders', [
+            'items' => [['type' => 'product', 'id' => $momos->uuid, 'variant' => 'h']],
+        ])->assertCreated();
+        \App\Models\Favorite::create(['customer_id' => User::factory()->create()->id, 'business_id' => $business->id]);
+
+        $this->as($owner)->getJson('/api/v1/business/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.metrics.totalOrders', 1)
+            ->assertJsonPath('data.metrics.totalFollowers', 1);
     }
 }

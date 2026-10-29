@@ -22,4 +22,6 @@ Schedule::command('orders:release-unpaid')->everyFiveMinutes()->withoutOverlappi
 
 // Personal link expiry reminders -- one a day per shop, from N days before it
 // runs out. No-op until an admin switches reminders on.
+// Birthdays and anniversaries two days out, to customers (OccasionService).
+Schedule::command('occasions:remind')->dailyAt('09:00')->timezone(config('app.business_timezone'))->withoutOverlapping();
 Schedule::command('personal-link:remind')->dailyAt('10:00')->timezone(config('app.business_timezone'))->withoutOverlapping();

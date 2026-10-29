@@ -158,6 +158,12 @@ class BusinessService
                 'totalCustomers' => $totalCustomers,
                 'repeatCustomers' => $repeatCustomers,
                 'totalVisits' => $business->total_visits,
+                'totalFollowers' => $business->followers()->count(),
+                // Every order the shop has taken, not counting unpaid online checkouts.
+                'totalOrders' => $business->orders()
+                    ->where('status', '!=', \App\Enums\OrderStatus::AwaitingPayment->value)->count(),
+                'completedOrders' => $business->orders()
+                    ->where('status', \App\Enums\OrderStatus::Completed->value)->count(),
                 'totalSpins' => $business->total_spins,
                 'totalRewards' => $business->total_rewards,
             ],

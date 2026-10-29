@@ -132,6 +132,12 @@ class Plan extends Model
             return ['on' => $legacy === null || in_array($legacy, $this->features ?? [], true), 'days' => null];
         }
 
+        // Rewards were part of "loyalty" until they got their own switch: a plan
+        // saved before then gives rewards whatever it gave loyalty.
+        if ($module === 'rewards' && ! array_key_exists('rewards', $this->modules)) {
+            return $this->moduleConfig('loyalty');
+        }
+
         $entry = $this->modules[$module] ?? null;
         if (is_bool($entry)) {
             return ['on' => $entry, 'days' => null];

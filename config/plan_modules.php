@@ -20,7 +20,8 @@ return [
     'tables' => ['name' => 'Tables & dine-in', 'description' => 'Dining tables with table QR', 'group' => 'Orders & payments', 'paths' => ['tables']],
     'combos' => ['name' => 'Combos', 'description' => 'Combo deals', 'group' => 'Sell more', 'paths' => ['combos']],
     'grow_sales' => ['name' => 'Grow sales', 'description' => 'Promotions and timed discounts', 'group' => 'Sell more', 'paths' => ['promotions']],
-    'loyalty' => ['name' => 'Rewards & loyalty', 'description' => 'Bill discount, coupons, coins, stamps, scratch cards', 'group' => 'Bring customers back', 'paths' => ['loyalty', 'rewards', 'coupons']],
+    'rewards' => ['name' => 'Rewards & coupons', 'description' => 'Bill discount, come-back and loyalty-step coupons, coupon codes', 'group' => 'Bring customers back', 'paths' => ['rewards', 'coupons']],
+    'loyalty' => ['name' => 'Loyalty coins', 'description' => 'Coins customers earn and spend at the shop', 'group' => 'Bring customers back', 'paths' => ['loyalty']],
     'spin_rewards' => ['name' => 'Spin rewards', 'description' => 'Spin-and-win offers', 'group' => 'Bring customers back', 'paths' => ['offers']],
     'redeem' => ['name' => 'Redeem', 'description' => 'Redeem reward PINs at the counter', 'group' => 'Bring customers back', 'paths' => ['redeem', 'redemptions', 'token']],
     // Checked when sending (ShopPushService), which explains why it is blocked.

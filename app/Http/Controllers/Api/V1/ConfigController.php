@@ -42,6 +42,8 @@ class ConfigController extends Controller
             // Admin-configurable new-order alert sound for owners (null = built-in ding).
             'orderSoundUrl' => $this->settings->get('orderSoundUrl'),
             'ownerModules' => $ownerModules,
+            // Shop rewards (bill discount, come-back, loyalty steps, coupon codes).
+            'rewardsEnabled' => FeatureFlag::isEnabled('owner_rewards', true),
             // Admin-set colours and fonts, applied app-wide on every device, plus
             // whether shop menu cards are tinted with each dish's colours.
             'theme' => $this->settings->theme(),
@@ -72,6 +74,8 @@ class ConfigController extends Controller
             ],
             // So the home page can say what coins are worth in rupees.
             'coins' => [
+                // Customers see coins only while the admin's "Loyalty coins" switch is on.
+                'enabled' => app(\App\Services\LoyaltyService::class)->isEnabled(),
                 'value' => (int) config('loyalty.coin_value', 1),
                 'welcome' => (int) config('loyalty.earn.welcome', 0),
             ],

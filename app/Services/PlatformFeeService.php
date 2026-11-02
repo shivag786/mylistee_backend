@@ -3,19 +3,20 @@
 namespace App\Services;
 
 /**
- * Listee's cut of an order, borne by the shop — the customer pays the same
- * price online or in cash. Two parts, both admin-set:
- *  - platform fee: on every order (default 2%);
- *  - payment fee: what the gateway charges, on the part paid online (default 2%).
- * The shop keeps the rest. Recorded on each order, so it can be settled.
+ * What comes out of a shop's order, borne by the shop — the customer pays the
+ * same price online or in cash. Shops pay Listee by subscription, so there is
+ * no per-order platform fee; only the payment gateway's fee (admin-set,
+ * default 2%) on the part paid online. Cash orders cost the shop nothing.
+ * Recorded on each order, so it can be settled.
  */
 class PlatformFeeService
 {
     public function __construct(private readonly SettingService $settings) {}
 
+    /** Always 0 — the subscription replaces a cut of each order. */
     public function platformPercent(): float
     {
-        return max(0.0, (float) $this->settings->get('platformFeePercent', 2.0));
+        return 0.0;
     }
 
     public function gatewayPercent(): float

@@ -59,9 +59,11 @@ class ConfigController extends Controller
                 'razorpay' => $this->razorpay->isConfigured(),
                 // Fee added to the customer's online share, in percent (0 by default).
                 'convenienceFeePercent' => $this->razorpay->isConfigured() ? (float) $this->settings->get('customerFeePercent', 0) : 0,
-                // Listee's cut of a shop's order: platform on every order, the
-                // gateway's on the online part. Shown to shops per product.
-                'platformFeePercent' => (float) $this->settings->get('platformFeePercent', 2.0),
+                // What comes out of a shop's order: shops are on a subscription,
+                // so no platform fee — only the gateway's on the online part.
+                // Shown to shops per product. platformFeePercent stays (0) for
+                // older app builds that still read it.
+                'platformFeePercent' => 0,
                 'gatewayFeePercent' => $this->razorpay->feePercent(),
             ],
             // Which ways in the customer login page offers. SettingService keeps

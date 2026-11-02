@@ -78,13 +78,13 @@ class RewardsAndCouponsTest extends TestCase
             ->assertJsonPath('data.billNudge.needed', 150)
             ->assertJsonPath('data.billNudge.label', '₹50 off');
 
-        // ₹500 → ₹50 off; Listee's 2% comes out of the shop's share, not the bill.
+        // ₹500 → ₹50 off; a cash order — no Listee fee (subscription), the shop keeps it all.
         $this->order($this->customer(), $business, $product, 2)->assertCreated()
             ->assertJsonPath('data.billDiscount', 50)
             ->assertJsonPath('data.total', 450);
         $order = Order::latest('id')->first();
-        $this->assertSame('9.00', $order->platform_fee);
-        $this->assertSame('441.00', $order->vendor_earning);
+        $this->assertSame('0.00', $order->platform_fee);
+        $this->assertSame('450.00', $order->vendor_earning);
     }
 
     public function test_a_coupon_replaces_the_bill_discount_only_when_it_saves_more(): void
@@ -258,12 +258,14 @@ class RewardsAndCouponsTest extends TestCase
         ])->assertOk()->assertJsonPath('data.couponError', 'That code isn’t valid at this shop.');
     }
 
-    public function test_online_orders_carry_the_gateway_share_too(): void
+    public function test_only_online_payments_carry_a_fee(): void
     {
+        // A leftover platform setting is ignored — shops pay by subscription.
         app(SettingService::class)->set(['platformFeePercent' => 2, 'razorpayFeePercent' => 2]);
-        $fees = app(\App\Services\PlatformFeeService::class)->split(500, 500);
+        $fees = app(\App\Services\PlatformFeeService::class);
 
-        $this->assertSame(['platform' => 10.0, 'gateway' => 10.0, 'vendor' => 480.0], $fees);
+        $this->assertSame(['platform' => 0.0, 'gateway' => 10.0, 'vendor' => 490.0], $fees->split(500, 500));
+        $this->assertSame(['platform' => 0.0, 'gateway' => 0.0, 'vendor' => 500.0], $fees->split(500, 0));
     }
 
     public function test_a_loyalty_step_can_ask_for_a_minimum_bill(): void

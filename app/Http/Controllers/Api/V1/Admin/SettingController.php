@@ -123,9 +123,56 @@ class SettingController extends Controller
             'homeLayout.*.enabled' => ['required', 'boolean'],
             'homeLayout.*.title' => ['nullable', 'string', 'max:40'],
             'homeLayout.*.slot' => ['nullable', Rule::in(SettingService::HOME_SLOTS)],
+
+            // Which page `/` shows signed-out visitors, and the landing page's content
+            'homePage' => ['sometimes', Rule::in(['shops', 'landing'])],
+            'landingPage' => ['sometimes', 'nullable', 'array'],
+            'landingPage.sections' => ['sometimes', 'array', 'max:'.count(SettingService::LANDING_SECTIONS)],
+            'landingPage.sections.*.id' => ['required', 'distinct', Rule::in(SettingService::LANDING_SECTIONS)],
+            'landingPage.sections.*.enabled' => ['required', 'boolean'],
+            'landingPage.sections.*.title' => ['nullable', 'string', 'max:80'],
+            'landingPage.sections.*.subtitle' => ['nullable', 'string', 'max:240'],
+            'landingPage.hero' => ['sometimes', 'array'],
+            'landingPage.hero.badge' => ['nullable', 'string', 'max:60'],
+            'landingPage.hero.title' => ['nullable', 'string', 'max:120'],
+            'landingPage.hero.subtitle' => ['nullable', 'string', 'max:300'],
+            'landingPage.hero.customerCta' => ['nullable', 'string', 'max:40'],
+            'landingPage.hero.vendorCta' => ['nullable', 'string', 'max:40'],
+            'landingPage.customerBenefits' => ['sometimes', 'array', 'max:12'],
+            'landingPage.customerBenefits.*.title' => ['required', 'string', 'max:60'],
+            'landingPage.customerBenefits.*.text' => ['nullable', 'string', 'max:240'],
+            'landingPage.vendorBenefits' => ['sometimes', 'array', 'max:12'],
+            'landingPage.vendorBenefits.*.title' => ['required', 'string', 'max:60'],
+            'landingPage.vendorBenefits.*.text' => ['nullable', 'string', 'max:240'],
+            'landingPage.faqs' => ['sometimes', 'array', 'max:30'],
+            'landingPage.faqs.*.q' => ['required', 'string', 'max:200'],
+            'landingPage.faqs.*.a' => ['required', 'string', 'max:1500'],
+
+            // SEO. Verification codes and the Analytics id end up in the page
+            // head, so they are held to the characters those formats use.
+            'seo' => ['sometimes', 'nullable', 'array'],
+            'seo.siteTitle' => ['nullable', 'string', 'max:70'],
+            'seo.description' => ['nullable', 'string', 'max:320'],
+            'seo.keywords' => ['nullable', 'string', 'max:400'],
+            'seo.ogImageUrl' => ['nullable', 'url', 'max:500'],
+            'seo.googleVerification' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_\-]+$/'],
+            'seo.bingVerification' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9_\-]+$/'],
+            'seo.googleAnalyticsId' => ['nullable', 'string', 'max:20', 'regex:/^G-[A-Z0-9]+$/'],
+            'seo.noindex' => ['sometimes', 'boolean'],
+            'seo.pages' => ['sometimes', 'array'],
+            'seo.pages.*.title' => ['nullable', 'string', 'max:70'],
+            'seo.pages.*.description' => ['nullable', 'string', 'max:320'],
         ], [
+            'seo.googleVerification.regex' => 'Paste only the code from the content="…" part of Google\'s meta tag.',
+            'seo.bingVerification.regex' => 'Paste only the code from the content="…" part of Bing\'s meta tag.',
+            'seo.googleAnalyticsId.regex' => 'A Google Analytics 4 id looks like G-XXXXXXXXXX.',
             'razorpayKeyId.regex' => 'That does not look like a Razorpay key id (it starts with rzp_test_ or rzp_live_).',
         ]);
+
+        // Per-page SEO is kept to the pages the site knows; anything else is dropped.
+        if (isset($validated['seo']['pages']) && is_array($validated['seo']['pages'])) {
+            $validated['seo']['pages'] = array_intersect_key($validated['seo']['pages'], array_flip(SettingService::SEO_PAGES));
+        }
 
         $this->settings->set($validated);
 

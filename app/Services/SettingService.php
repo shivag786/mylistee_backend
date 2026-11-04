@@ -121,7 +121,27 @@ class SettingService
         // homeSections.ts). Sections missing from a saved list still show, at
         // their default place, so a new section never silently disappears.
         'homeLayout' => null,
+
+        // What `/` shows a signed-out visitor: the shop feed ('shops') or the
+        // landing page that explains Listee to customers and shop owners
+        // ('landing'). Signed-in users always get the shop feed.
+        'homePage' => 'shops',
+        // Landing page copy and section order. Null = the built-in content
+        // (frontend landingContent.ts); a saved object overrides it field by field.
+        'landingPage' => null,
+        // Search and social tags: site title, description, share image,
+        // verification codes and per-page titles. Null = the built-in defaults.
+        'seo' => null,
     ];
+
+    /** Landing page section ids. Mirrors the frontend registry (landingContent.ts). */
+    public const LANDING_SECTIONS = [
+        'hero', 'banners', 'categories', 'offers', 'nearby', 'customerBenefits', 'howItWorks',
+        'vendorBenefits', 'personalLink', 'pricing', 'faqs', 'finalCta',
+    ];
+
+    /** Pages that can carry their own SEO title and description. */
+    public const SEO_PAGES = ['landing', 'explore', 'nearby', 'deals', 'search', 'ownerSignup', 'login'];
 
     /** Home page section ids the layout may list. Mirrors the frontend registry. */
     public const HOME_SECTIONS = [

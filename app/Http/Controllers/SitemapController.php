@@ -23,7 +23,11 @@ class SitemapController extends Controller
 
         $urls = [
             ['loc' => $base.'/', 'priority' => '1.0'],
+            ['loc' => $base.'/explore', 'priority' => '0.9'],
             ['loc' => $base.'/nearby', 'priority' => '0.8'],
+            ['loc' => $base.'/deals', 'priority' => '0.8'],
+            // Shop-owner sign-up: the page the landing page sends businesses to.
+            ['loc' => $base.'/get-started', 'priority' => '0.8'],
         ];
 
         Business::query()

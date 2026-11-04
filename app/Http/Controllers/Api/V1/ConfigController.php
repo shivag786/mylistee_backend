@@ -51,6 +51,18 @@ class ConfigController extends Controller
             'vendorApp' => app(\App\Services\VendorAppThemeService::class)->get(),
             // Admin-arranged home page sections; null = the built-in order.
             'homeLayout' => $this->settings->get('homeLayout'),
+            // What `/` shows signed-out visitors ('shops' | 'landing'), the
+            // landing page's admin-edited content (null = built-in) and the SEO tags.
+            'homePage' => (string) $this->settings->get('homePage', 'shops'),
+            'landingPage' => $this->settings->get('landingPage'),
+            'seo' => $this->settings->get('seo'),
+            // Personal link packs, for the landing page's "your own shop link" pitch.
+            'personalLink' => [
+                'trialDays' => (int) $this->settings->get('personalLinkTrialDays', 7),
+                'price30' => (float) $this->settings->get('personalLinkPrice30', 150),
+                'price90' => (float) $this->settings->get('personalLinkPrice90', 399),
+                'price365' => (float) $this->settings->get('personalLinkPrice365', 1499),
+            ],
             // Whether a live payment gateway is wired up. Only a boolean — no key
             // is exposed here; the publishable key comes back from the checkout
             // call itself. The owner UI uses this to decide between the paid

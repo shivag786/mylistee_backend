@@ -52,10 +52,15 @@ class BusinessDiscoveryService
 
         if (! empty($filters['search'])) {
             $term = '%'.$filters['search'].'%';
-            $query->where(function ($q) use ($term): void {
+            $dish = fn ($p) => $p->where('is_visible', true)->where('name', 'like', $term);
+            $query->where(function ($q) use ($term, $dish): void {
                 $q->where('name', 'like', $term)
-                    ->orWhereHas('category', fn ($c) => $c->where('name', 'like', $term));
-            });
+                    ->orWhereHas('category', fn ($c) => $c->where('name', 'like', $term))
+                    // "momos" also finds the shops that sell momos.
+                    ->orWhereHas('products', $dish);
+            })
+                // The matching dishes ride along so the card can show them.
+                ->with(['products' => fn ($p) => $dish($p)->orderBy('position')]);
         }
 
         if (! empty($filters['category'])) {

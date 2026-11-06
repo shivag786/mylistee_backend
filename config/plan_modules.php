@@ -19,6 +19,8 @@ return [
     'pay_online' => ['name' => 'Pay online', 'description' => 'UPI / card through Razorpay', 'group' => 'Orders & payments', 'paths' => [], 'customer' => true],
     'tables' => ['name' => 'Tables & dine-in', 'description' => 'Dining tables with table QR', 'group' => 'Orders & payments', 'paths' => ['tables']],
     'combos' => ['name' => 'Combos', 'description' => 'Combo deals', 'group' => 'Sell more', 'paths' => ['combos']],
+    // Paid per use (OpenAI): like WhatsApp, off for plans nobody has set up.
+    'ai_assistant' => ['name' => 'AI assistant', 'description' => 'Write dish text, offer ideas, notifications and replies with AI', 'group' => 'Sell more', 'paths' => ['ai']],
     'grow_sales' => ['name' => 'Grow sales', 'description' => 'Promotions and timed discounts', 'group' => 'Sell more', 'paths' => ['promotions']],
     'rewards' => ['name' => 'Rewards & coupons', 'description' => 'Bill discount, come-back and loyalty-step coupons, coupon codes', 'group' => 'Bring customers back', 'paths' => ['rewards', 'coupons']],
     'loyalty' => ['name' => 'Loyalty coins', 'description' => 'Coins customers earn and spend at the shop', 'group' => 'Bring customers back', 'paths' => ['loyalty']],

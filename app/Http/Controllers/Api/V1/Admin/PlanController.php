@@ -20,6 +20,9 @@ class PlanController extends Controller
     public function __construct(private readonly AuditService $audit) {}
 
     /** camelCase request key → snake_case column, shared by store + update. */
+    /** The three billing types a plan can have: Monthly, Quarterly, Yearly. */
+    private const BILLING = ['month', 'quarter', 'year'];
+
     private const FIELD_MAP = [
         'maxActiveOffers' => 'max_active_offers',
         'maxActiveCombos' => 'max_active_combos',
@@ -61,7 +64,7 @@ class PlanController extends Controller
             'description' => ['nullable', 'string', 'max:255'],
             'price' => ['required', 'numeric', 'min:0'],
             'currency' => ['nullable', 'string', 'size:3'],
-            'interval' => ['required', 'in:month,quarter,year,lifetime'],
+            'interval' => ['required', 'in:'.implode(',', self::BILLING)],
             'maxActiveOffers' => ['nullable', 'integer', 'min:0'],
             'maxActiveCombos' => ['nullable', 'integer', 'min:0'],
             'maxActivePromotions' => ['nullable', 'integer', 'min:0'],
@@ -82,7 +85,7 @@ class PlanController extends Controller
             'sortOrder' => ['sometimes', 'integer'],
         ]);
 
-        $payload = $this->mapPayload($validated);
+        $payload = $this->billingDecidesLength($this->mapPayload($validated), (float) $validated['price']);
         if ($this->setsDuration($payload)) {
             $payload['days_from'] = now();
         }
@@ -104,7 +107,7 @@ class PlanController extends Controller
             'name' => ['sometimes', 'string', 'max:60'],
             'description' => ['sometimes', 'nullable', 'string', 'max:255'],
             'price' => ['sometimes', 'numeric', 'min:0'],
-            'interval' => ['sometimes', 'in:month,quarter,year,lifetime'],
+            'interval' => ['sometimes', 'in:'.implode(',', self::BILLING)],
             'maxActiveOffers' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'maxActiveCombos' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'maxActivePromotions' => ['sometimes', 'nullable', 'integer', 'min:0'],
@@ -131,7 +134,7 @@ class PlanController extends Controller
             return ApiResponse::error('The default plan is always active.', status: 422);
         }
 
-        $payload = $this->mapPayload($validated);
+        $payload = $this->billingDecidesLength($this->mapPayload($validated), (float) ($validated['price'] ?? $plan->price));
         // Free days count from the day they are first set, so turning them on
         // never ends an older shop's free time on the spot.
         if ($this->setsDuration($payload) && $plan->days_from === null) {
@@ -165,6 +168,24 @@ class PlanController extends Controller
             'introEndsAt' => [...$opt, 'date'],
             'introLabel' => [...$opt, 'string', 'max:60'],
         ];
+    }
+
+    /**
+     * A paid plan lasts exactly its billing period (monthly, quarterly or
+     * yearly), so any custom days/months are cleared. Only the free plan keeps
+     * a custom length — its free period.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function billingDecidesLength(array $payload, float $price): array
+    {
+        if ($price > 0) {
+            $payload['duration_days'] = null;
+            $payload['duration_months'] = null;
+        }
+
+        return $payload;
     }
 
     /** @param  array<string, mixed>  $payload */

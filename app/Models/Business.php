@@ -378,14 +378,12 @@ class Business extends Model
     }
 
     /**
-     * The personal link (store mode bought by the day — see PersonalLinkService):
-     * switched on by the owner, with trial or paid days left.
+     * The personal link (store mode — see PersonalLinkService): free and never
+     * expires, so it is live whenever the owner has it switched on.
      */
     public function hasActivePersonalLink(): bool
     {
-        return $this->personal_link_enabled
-            && $this->personal_link_expires_at !== null
-            && $this->personal_link_expires_at->isFuture();
+        return (bool) $this->personal_link_enabled;
     }
 
     /** The owner closed the shop for a while (Settings → Shop closed) and it has not reopened yet. */

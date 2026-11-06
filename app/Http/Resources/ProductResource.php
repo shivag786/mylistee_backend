@@ -63,7 +63,8 @@ class ProductResource extends JsonResource
                     'typeLabel' => $promotion->promotion_type->label(),
                     'label' => $promotion->displayLabel(),
                     // Drives the menu countdown; only when it switches itself off.
-                    'endsAt' => $promotion->auto_stop ? $promotion->ends_at?->toIso8601String() : null,
+                    'endsAt' => $promotion->countdownEnd()?->toIso8601String(),
+                    'window' => $promotion->dailyWindowLabel(),
                 ];
             }),
             // Sizes carry their price after the product's own discount; any

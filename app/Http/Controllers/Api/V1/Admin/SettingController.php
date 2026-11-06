@@ -104,6 +104,12 @@ class SettingController extends Controller
 
             'loginGoogle' => ['sometimes', 'boolean'],
             'loginMobile' => ['sometimes', 'boolean'],
+            'spinShowCounts' => ['sometimes', 'boolean'],
+            'customerSoundsEnabled' => ['sometimes', 'boolean'],
+            'aiEnabled' => ['sometimes', 'boolean'],
+            'openaiApiKey' => ['sometimes', 'nullable', 'string', 'max:300'],
+            'openaiModel' => ['sometimes', 'nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'aiMonthlyLimit' => ['sometimes', 'integer', 'min:0', 'max:100000'],
 
             // Theme
             ...array_fill_keys(SettingService::THEME_COLORS, ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/']),
@@ -235,6 +241,43 @@ class SettingController extends Controller
         $this->audit->log($request->user(), 'settings.order_sound.upload', null, 'Uploaded order alert sound');
 
         return ApiResponse::success($this->settings->masked(), 'Order sound updated.');
+    }
+
+    /**
+     * POST /admin/settings/customer-sound/{kind} -- the tone customers hear when
+     * they place an order (`placed`) or the shop accepts it (`accepted`).
+     */
+    public function uploadCustomerSound(Request $request, string $kind): JsonResponse
+    {
+        abort_unless(in_array($kind, ['placed', 'accepted'], true), 404);
+        $request->validate([
+            'sound' => [
+                'required', 'file',
+                'mimetypes:audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm,audio/mp4,audio/aac,audio/x-m4a',
+                'max:1024',
+            ],
+        ]);
+        $key = 'customerSound'.ucfirst($kind);
+        $this->storage->delete($this->settings->get($key.'Path'));
+        $path = $this->storage->store($request->file('sound'), 'sounds');
+        $this->settings->set([$key.'Path' => $path, $key.'Url' => $this->storage->url($path)]);
+
+        $this->audit->log($request->user(), "settings.customer_sound.{$kind}.upload", null, "Uploaded customer {$kind} sound");
+
+        return ApiResponse::success($this->settings->masked(), 'Sound updated.');
+    }
+
+    /** DELETE /admin/settings/customer-sound/{kind} -- back to the built-in tone. */
+    public function deleteCustomerSound(Request $request, string $kind): JsonResponse
+    {
+        abort_unless(in_array($kind, ['placed', 'accepted'], true), 404);
+        $key = 'customerSound'.ucfirst($kind);
+        $this->storage->delete($this->settings->get($key.'Path'));
+        $this->settings->set([$key.'Path' => null, $key.'Url' => null]);
+
+        $this->audit->log($request->user(), "settings.customer_sound.{$kind}.delete", null, "Removed customer {$kind} sound");
+
+        return ApiResponse::success($this->settings->masked(), 'Sound removed.');
     }
 
     /** DELETE /admin/settings/order-sound — revert owners to the built-in ding. */

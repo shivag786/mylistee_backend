@@ -69,6 +69,25 @@ class SettingService
         'loginGoogle' => true,
         'loginMobile' => false,
 
+        // Spin & win: show customers how many people played and won at each
+        // shop ("1,240 played · 860 won"). Social proof; switch off to hide.
+        'spinShowCounts' => true,
+
+        // Customer app sounds: one when an order is placed, one when the shop
+        // accepts it. Empty URL = the app's built-in tone.
+        'customerSoundsEnabled' => true,
+        'customerSoundPlacedPath' => null,
+        'customerSoundPlacedUrl' => null,
+        'customerSoundAcceptedPath' => null,
+        'customerSoundAcceptedUrl' => null,
+
+        // Vendor app AI assistant (OpenAI). Off until a key is saved and it is
+        // switched on; the plan decides which shops get it (module ai_assistant).
+        'aiEnabled' => false,
+        'openaiApiKey' => '',
+        'openaiModel' => 'gpt-4o-mini',
+        'aiMonthlyLimit' => 100,
+
         // App theme, applied on every device through GET /config. Defaults are
         // the stock palette in the frontend's tokens.css; hover and soft shades
         // are derived from these on the client.
@@ -180,7 +199,7 @@ class SettingService
      *
      * @var list<string>
      */
-    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'gmailAppPassword'];
+    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'gmailAppPassword', 'openaiApiKey'];
 
     /**
      * All settings merged over their defaults.

@@ -95,6 +95,33 @@ class Promotion extends Model
         return $this->withinDailyWindow($now);
     }
 
+    /**
+     * When the running offer stops, for the customer's countdown: today's end
+     * of a happy-hour window, else the end date if it switches itself off.
+     */
+    public function countdownEnd(?Carbon $now = null): ?Carbon
+    {
+        $now ??= Carbon::now();
+        if ($this->daily_start_time !== null && $this->daily_end_time !== null) {
+            $end = Carbon::parse($now->toDateString().' '.$this->normaliseTime($this->daily_end_time), $now->getTimezone());
+
+            return $this->ends_at !== null && $this->ends_at->lt($end) ? $this->ends_at : $end;
+        }
+
+        return $this->auto_stop ? $this->ends_at : null;
+    }
+
+    /** "4:00 PM – 6:00 PM" for a daily window, else null. */
+    public function dailyWindowLabel(): ?string
+    {
+        if ($this->daily_start_time === null || $this->daily_end_time === null) {
+            return null;
+        }
+        $fmt = fn ($t) => Carbon::createFromFormat('H:i:s', $this->normaliseTime($t))->format('g:i A');
+
+        return $fmt($this->daily_start_time).' – '.$fmt($this->daily_end_time);
+    }
+
     /** True when no daily window is set, or `now` falls inside it. */
     public function withinDailyWindow(Carbon $now): bool
     {

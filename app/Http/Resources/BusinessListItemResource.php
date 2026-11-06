@@ -54,6 +54,13 @@ class BusinessListItemResource extends JsonResource
             // "₹50 off above ₹499" — the shop's headline reward, or null.
             'perk' => app(\App\Services\RewardService::class)->headline($this->resource->rewardSetting),
             'status' => $this->status->value,
+            // Search only: dishes here whose name matched ("Paneer momos").
+            'matchedItems' => $this->whenLoaded('products', fn () => $this->products->take(3)->map(fn ($p) => [
+                'id' => $p->uuid,
+                'name' => $p->name,
+                'price' => round((float) $p->selling_price, 2),
+                'imageUrl' => $p->image_path ? \Illuminate\Support\Facades\Storage::disk('public')->url($p->image_path) : null,
+            ])->values()),
         ];
     }
 

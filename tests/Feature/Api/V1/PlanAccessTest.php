@@ -193,28 +193,35 @@ class PlanAccessTest extends TestCase
     public function test_an_early_renewal_adds_to_the_days_left(): void
     {
         [$owner] = $this->shop();
-        $this->editPlan('pro', ['durationDays' => 30]);
+        Carbon::setTestNow(Carbon::parse('2026-04-01 10:00:00'));
+        $this->editPlan('pro', ['interval' => 'month']);
 
         $this->token($owner)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertOk()
             ->assertJsonPath('data.access.daysLeft', 30);
         Carbon::setTestNow(now()->addDays(10));
+        // 20 days left (to 1 May) + a month (to 1 June).
         $this->token($owner)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertOk()
-            ->assertJsonPath('data.access.daysLeft', 50);
+            ->assertJsonPath('data.access.daysLeft', 51);
     }
 
-    public function test_a_plan_can_last_months_and_setting_months_clears_the_days(): void
+    public function test_a_paid_plan_lasts_its_billing_period_monthly_quarterly_or_yearly(): void
     {
         [$owner] = $this->shop();
-        Carbon::setTestNow(Carbon::parse('2026-01-31 10:00:00'));
-        $this->editPlan('pro', ['durationDays' => 30]);
-        $this->editPlan('pro', ['durationMonths' => 3, 'durationDays' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-01-15 10:00:00'));
 
+        // A custom length on a paid plan is cleared — the billing decides.
+        $this->editPlan('pro', ['interval' => 'quarter', 'durationDays' => 30]);
         $plan = Plan::where('key', 'pro')->sole();
+        $this->assertSame('quarter', $plan->interval);
         $this->assertNull($plan->duration_days);
-        $this->assertSame(3, $plan->duration_months);
+        $this->assertNull($plan->duration_months);
 
         $this->token($owner)->postJson('/api/v1/business/subscription', ['planKey' => 'pro'])->assertOk()
-            ->assertJsonPath('data.subscription.endsAt', Carbon::parse('2026-04-30 10:00:00')->toIso8601String());
+            ->assertJsonPath('data.subscription.endsAt', Carbon::parse('2026-04-15 10:00:00')->toIso8601String());
+
+        // Only the three billing types are allowed.
+        $this->token(User::factory()->admin()->create())
+            ->patchJson('/api/v1/admin/plans/pro', ['interval' => 'lifetime'])->assertStatus(422);
     }
 
     public function test_an_inactive_plan_cannot_be_bought_but_shops_on_it_keep_it(): void

@@ -124,7 +124,7 @@ class Plan extends Model
     {
         if ($this->modules === null) {
             // WhatsApp costs per message: never on for a plan nobody has set up.
-            if ($module === 'whatsapp') {
+            if ($module === 'whatsapp' || $module === 'ai_assistant') {
                 return ['on' => false, 'days' => null];
             }
             $legacy = ['store_mode' => 'store_mode', 'notifications' => 'push_notifications'][$module] ?? null;

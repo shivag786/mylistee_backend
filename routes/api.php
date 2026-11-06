@@ -98,6 +98,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('app/manifest.webmanifest', [\App\Http\Controllers\Api\V1\AppBrandingController::class, 'manifest'])->name('app.manifest');
 
     Route::get('home/spotlight', [\App\Http\Controllers\Api\V1\HomeSpotlightController::class, 'index'])->name('home.spotlight');
+    Route::get('home/popular-items', [\App\Http\Controllers\Api\V1\HomePopularController::class, 'index'])->name('home.popular');
+    Route::get('spins', [\App\Http\Controllers\Api\V1\SpinFeedController::class, 'index'])->name('spins.index');
 
     // Shop Reels
     Route::get('reels', [\App\Http\Controllers\Api\V1\ReelFeedController::class, 'index'])->name('reels.index');
@@ -264,6 +266,12 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Analytics (document/phase/07 §Analytics, Milestone 12)
             Route::get('analytics', [AnalyticsController::class, 'index'])->name('analytics');
 
+            // AI assistant (vendor app): ideas and copy, on plans with the module.
+            Route::get('ai', [\App\Http\Controllers\Api\V1\Business\AiController::class, 'show'])->name('ai.show');
+            Route::post('ai/generate', [\App\Http\Controllers\Api\V1\Business\AiController::class, 'generate'])
+                ->middleware('throttle:20,1')
+                ->name('ai.generate');
+
             // Followers — the customers who followed this shop.
             Route::get('followers', [FollowerController::class, 'index'])->name('followers.index');
 
@@ -285,19 +293,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
                 ->middleware('throttle:20,1')
                 ->name('subscription.payment-failed');
 
-            // Personal link — store mode by the day: switch (free trial once),
-            // then day packs paid with Razorpay.
+            // Personal link — store mode, free and never expiring: just a switch.
             Route::get('personal-link', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'show'])->name('personal-link.show');
             Route::put('personal-link', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'update'])->name('personal-link.update');
-            Route::post('personal-link/checkout', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'checkout'])
-                ->middleware('throttle:10,1')
-                ->name('personal-link.checkout');
-            Route::post('personal-link/verify', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'verify'])
-                ->middleware('throttle:20,1')
-                ->name('personal-link.verify');
-            Route::post('personal-link/payment-failed', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'failed'])
-                ->middleware('throttle:20,1')
-                ->name('personal-link.payment-failed');
 
             Route::post('gallery', [BusinessGalleryController::class, 'store'])->name('gallery.store');
             Route::delete('gallery/{uuid}', [BusinessGalleryController::class, 'destroy'])->name('gallery.destroy');
@@ -497,13 +495,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('orders', [AdminOrderController::class, 'index'])->name('orders.index');
             Route::get('payments', [AdminPaymentController::class, 'index'])->name('payments.index');
 
-            // Personal links: every shop's status; give a package free or by payment link.
+            // Personal links: which shops have theirs switched on.
             Route::get('personal-links', [\App\Http\Controllers\Api\V1\Admin\PersonalLinkController::class, 'index'])->name('personal-links.index');
-            Route::get('personal-links/{uuid}', [\App\Http\Controllers\Api\V1\Admin\PersonalLinkController::class, 'show'])->name('personal-links.show');
-            Route::post('personal-links/{uuid}/grant', [\App\Http\Controllers\Api\V1\Admin\PersonalLinkController::class, 'grant'])
-                ->middleware('throttle:30,1')->name('personal-links.grant');
-            Route::post('personal-links/grants/{uuid}/sync', [\App\Http\Controllers\Api\V1\Admin\PersonalLinkController::class, 'sync'])->name('personal-links.sync');
-            Route::post('personal-links/grants/{uuid}/cancel', [\App\Http\Controllers\Api\V1\Admin\PersonalLinkController::class, 'cancel'])->name('personal-links.cancel');
             Route::post('payments/{uuid}/refund', [AdminPaymentController::class, 'refund'])->name('payments.refund');
 
             // Broadcast notifications
@@ -545,6 +538,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
                 ->name('settings.test-email');
             Route::post('settings/order-sound', [SettingController::class, 'uploadOrderSound'])->name('settings.order-sound.upload');
             Route::delete('settings/order-sound', [SettingController::class, 'deleteOrderSound'])->name('settings.order-sound.delete');
+            Route::post('settings/customer-sound/{kind}', [SettingController::class, 'uploadCustomerSound'])->name('settings.customer-sound.upload');
+            Route::delete('settings/customer-sound/{kind}', [SettingController::class, 'deleteCustomerSound'])->name('settings.customer-sound.delete');
             Route::post('settings/app-icon', [SettingController::class, 'uploadAppIcon'])->name('settings.app-icon.upload');
             Route::delete('settings/app-icon', [SettingController::class, 'deleteAppIcon'])->name('settings.app-icon.delete');
             Route::get('cms', [CmsController::class, 'index'])->name('cms.index');

@@ -116,6 +116,8 @@ class PublicBusinessController extends Controller
                 'alreadySpunToday' => $user !== null
                     ? $this->spinner->hasSpunToday($user, $business)
                     : null,
+                // "1,240 played · 860 won" -- only while the admin shows counts.
+                ...\App\Http\Controllers\Api\V1\SpinFeedController::counts($business),
             ],
         ], 'Business profile.');
     }

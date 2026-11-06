@@ -28,8 +28,7 @@ class LandingAndSeoSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.homePage', 'shops')
             ->assertJsonPath('data.landingPage', null)
-            ->assertJsonPath('data.seo', null)
-            ->assertJsonPath('data.personalLink.trialDays', 7);
+            ->assertJsonPath('data.seo', null);
     }
 
     public function test_admin_switches_home_to_the_landing_page_and_edits_it(): void

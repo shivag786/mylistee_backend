@@ -56,13 +56,6 @@ class ConfigController extends Controller
             'homePage' => (string) $this->settings->get('homePage', 'shops'),
             'landingPage' => $this->settings->get('landingPage'),
             'seo' => $this->settings->get('seo'),
-            // Personal link packs, for the landing page's "your own shop link" pitch.
-            'personalLink' => [
-                'trialDays' => (int) $this->settings->get('personalLinkTrialDays', 7),
-                'price30' => (float) $this->settings->get('personalLinkPrice30', 150),
-                'price90' => (float) $this->settings->get('personalLinkPrice90', 399),
-                'price365' => (float) $this->settings->get('personalLinkPrice365', 1499),
-            ],
             // Whether a live payment gateway is wired up. Only a boolean — no key
             // is exposed here; the publishable key comes back from the checkout
             // call itself. The owner UI uses this to decide between the paid
@@ -80,6 +73,16 @@ class ConfigController extends Controller
             ],
             // Which ways in the customer login page offers. SettingService keeps
             // at least one on, so the page is never left with nothing.
+            // Spin & win: whether play/win counts are shown to customers.
+            'spin' => [
+                'showCounts' => (bool) $this->settings->get('spinShowCounts', true),
+            ],
+            // Customer app: tones for "order placed" and "order accepted".
+            'customerSounds' => [
+                'enabled' => (bool) $this->settings->get('customerSoundsEnabled', true),
+                'placed' => $this->settings->get('customerSoundPlacedUrl'),
+                'accepted' => $this->settings->get('customerSoundAcceptedUrl'),
+            ],
             'auth' => [
                 'google' => (bool) $this->settings->get('loginGoogle', true),
                 'mobile' => (bool) $this->settings->get('loginMobile', false),

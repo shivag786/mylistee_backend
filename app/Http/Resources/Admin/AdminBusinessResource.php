@@ -49,6 +49,7 @@ class AdminBusinessResource extends JsonResource
             'status' => $this->status instanceof \App\Enums\BusinessStatus ? $this->status->value : $this->status,
             'verified' => (bool) $this->verified,
             'featured' => (bool) $this->featured,
+            'onlinePayHidden' => (bool) $this->online_pay_hidden,
             'averageRating' => (float) $this->average_rating,
             'totalReviews' => (int) $this->total_reviews,
             'totalVisits' => (int) $this->total_visits,

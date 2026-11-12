@@ -183,6 +183,12 @@ class BusinessController extends Controller
         return $this->toggle($request, $uuid, 'featured', 'business.feature');
     }
 
+    /** PATCH /admin/businesses/{uuid}/online-pay -- hide or show "Pay online" for this shop. */
+    public function onlinePay(Request $request, string $uuid): JsonResponse
+    {
+        return $this->toggle($request, $uuid, 'online_pay_hidden', 'business.online_pay');
+    }
+
     private function toggle(Request $request, string $uuid, string $column, string $action): JsonResponse
     {
         $business = Business::where('uuid', $uuid)->first();

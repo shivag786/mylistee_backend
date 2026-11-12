@@ -46,6 +46,7 @@ class Business extends Model
         'kitchen_enabled',
         'verified',
         'featured',
+        'online_pay_hidden',
         'created_by',
         'updated_by',
         // SPEC-011 — Google Business Import fields (URLs/references only).
@@ -67,6 +68,7 @@ class Business extends Model
             'status' => BusinessStatus::class,
             'verified' => 'boolean',
             'featured' => 'boolean',
+            'online_pay_hidden' => 'boolean',
             'latitude' => 'decimal:7',
             'longitude' => 'decimal:7',
             'average_rating' => 'decimal:2',

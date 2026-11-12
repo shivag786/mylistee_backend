@@ -55,7 +55,7 @@ class OrderAlertTest extends TestCase
 
         $this->assertCount(1, $sent);
         $this->assertSame(['owner-phone'], $sent[0]['tokens']);
-        $this->assertSame("🛎️ New order {$order['token']}", $sent[0]['title']);
+        $this->assertSame("🛎️ New order {$order['token']} · No. 1", $sent[0]['title']);
         $this->assertSame('Pickup · ₹240 · 2 items · Priya', $sent[0]['body']);
         $this->assertSame('1', $sent[0]['data']['urgent']);
         $this->assertSame("order-{$order['id']}", $sent[0]['data']['tag']);

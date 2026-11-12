@@ -17,6 +17,7 @@ class OrderItemResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
+            'id' => $this->id,
             'name' => $this->name,
             'itemType' => $this->item_type,
             // Add-ons picked with the item ("Extra cheese"); the size is in the name.

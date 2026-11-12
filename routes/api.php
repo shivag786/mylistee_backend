@@ -339,6 +339,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('orders/quote', [OwnerOrderController::class, 'quote'])->name('orders.quote');
             Route::get('walk-ins', [OwnerOrderController::class, 'walkIns'])->name('walk-ins');
             Route::patch('orders/{uuid}/status', [OwnerOrderController::class, 'status'])->name('orders.status');
+            // POS: move to another table, change quantities, add items.
+            Route::patch('orders/{uuid}', [OwnerOrderController::class, 'update'])->name('orders.update');
             // Kitchen screen: queued -> preparing -> ready, and the shop's switch.
             Route::patch('orders/{uuid}/kitchen', [OwnerOrderController::class, 'kitchen'])->name('orders.kitchen');
             Route::get('kitchen', [\App\Http\Controllers\Api\V1\Business\KitchenController::class, 'index'])->name('kitchen.index');
@@ -455,6 +457,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('businesses/{uuid}/status', [AdminBusinessController::class, 'updateStatus'])->name('businesses.status');
             Route::patch('businesses/{uuid}/verify', [AdminBusinessController::class, 'verify'])->name('businesses.verify');
             Route::patch('businesses/{uuid}/feature', [AdminBusinessController::class, 'feature'])->name('businesses.feature');
+            Route::patch('businesses/{uuid}/online-pay', [AdminBusinessController::class, 'onlinePay'])->name('businesses.online-pay');
 
             // Master category management (Phase 7.1)
             Route::get('categories', [AdminCategoryController::class, 'index'])->name('categories.index');

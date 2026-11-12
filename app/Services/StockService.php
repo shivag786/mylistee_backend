@@ -59,6 +59,37 @@ class StockService
     }
 
     /**
+     * Put back units an edited order no longer needs -- only what the order
+     * had actually taken from a counted product.
+     *
+     * @param  array<int, int>  $units  product id => units no longer needed
+     * @param  array<int|string, int>  $taken  what the order holds now
+     * @return array<int, int> what went back
+     */
+    public function giveBack(array $units, array $taken): array
+    {
+        $back = [];
+        foreach ($units as $productId => $qty) {
+            $qty = min((int) $qty, (int) ($taken[$productId] ?? 0));
+            if ($qty <= 0) {
+                continue;
+            }
+            $product = Product::whereKey((int) $productId)->whereNotNull('stock_qty')->lockForUpdate()->first();
+            if ($product === null) {
+                continue;
+            }
+            if ($product->stock_qty === 0) {
+                $product->in_stock = true;
+            }
+            $product->stock_qty += $qty;
+            $product->save();
+            $back[(int) $productId] = $qty;
+        }
+
+        return $back;
+    }
+
+    /**
      * Put back what a cancelled order took. Safe to call twice: the order's
      * record is cleared after the first time.
      */

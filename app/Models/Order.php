@@ -59,6 +59,7 @@ class Order extends Model
         'delivery_lat',
         'delivery_lng',
         'placed_at',
+        'serial',
         'confirmed_at',
         'paid_at',
         'completed_at',
@@ -116,6 +117,29 @@ class Order extends Model
         $paid = $this->isPaidOnline() ? (float) $this->online_amount : 0.0;
 
         return max(0.0, round((float) $this->total - $paid, 2));
+    }
+
+    /**
+     * The next number of the day at this shop (1, 2, 3...), counted from the
+     * shop's midnight. Call inside the transaction that places the order.
+     */
+    public static function nextSerialFor(int $businessId): int
+    {
+        $start = \Illuminate\Support\Carbon::now(config('app.business_timezone', 'Asia/Kolkata'))->startOfDay()->utc();
+
+        return (int) static::where('business_id', $businessId)
+            ->where('placed_at', '>=', $start)
+            ->whereNotNull('serial')
+            ->lockForUpdate()
+            ->max('serial') + 1;
+    }
+
+    /** Give the order its number of the day, once (it reached the shop). */
+    public function assignSerial(): void
+    {
+        if ($this->serial === null) {
+            $this->forceFill(['serial' => static::nextSerialFor($this->business_id)])->save();
+        }
     }
 
     protected static function booted(): void

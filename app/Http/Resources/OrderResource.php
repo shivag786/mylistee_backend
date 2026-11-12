@@ -30,6 +30,8 @@ class OrderResource extends JsonResource
         return [
             'id' => $this->uuid,
             'token' => $this->token,
+            // The order's number of the day at the shop (1, 2, 3...).
+            'serial' => $this->serial,
             'status' => $status,
             'serviceType' => $serviceType->value,
             'serviceLabel' => $this->serviceLabel(),

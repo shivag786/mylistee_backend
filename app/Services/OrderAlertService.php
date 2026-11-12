@@ -61,7 +61,7 @@ class OrderAlertService
 
         // "Home delivery · ₹340 · 3 items · Priya"
         $summary = implode(' · ', array_filter([
-            $type === ServiceType::Delivery ? 'Home delivery' : $order->serviceLabel(),
+            $type === ServiceType::Delivery ? 'Home delivery' : ($order->diningTable ? "Table {$order->diningTable->label}" : $order->serviceLabel()),
             '₹'.rtrim(rtrim(number_format((float) $order->total, 2, '.', ''), '0'), '.'),
             $items === 1 ? '1 item' : "{$items} items",
             $customer !== '' ? $customer : null,
@@ -70,7 +70,7 @@ class OrderAlertService
         $this->notifications->notify(
             $owner,
             NotificationType::OrderPlaced,
-            "🛎️ New order {$order->token}",
+            "🛎️ New order {$order->token}".($order->serial ? " · No. {$order->serial}" : ''),
             $paymentLine ? "{$summary}\n{$paymentLine}" : $summary,
             [
                 'link' => '/business/orders',

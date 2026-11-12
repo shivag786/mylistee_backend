@@ -71,7 +71,8 @@ class OrderPaymentService
         $access = app(PlanAccessService::class);
         $planOnline = $access->allows($business, 'pay_online');
         $planCounter = $access->allows($business, 'pay_counter');
-        $online = $planOnline && $this->razorpay->isConfigured();
+        // The admin can hide paying online for one shop: pay at the counter only.
+        $online = $planOnline && $this->razorpay->isConfigured() && ! $business->online_pay_hidden;
 
         return [
             'onlineAvailable' => $online,
@@ -650,6 +651,7 @@ class OrderPaymentService
             'placed_at' => Carbon::now(),
             'cancelled_at' => null,
         ]);
+        $order->assignSerial();
 
         $due = $order->amountDue();
         $paidLine = $due > 0

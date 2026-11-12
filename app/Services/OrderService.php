@@ -118,6 +118,8 @@ class OrderService
 
             $order = Order::create([
                 'token' => $this->uniqueToken($business),
+                // Numbered when it reaches the shop (an online order: once paid).
+                'serial' => $awaitingPayment ? null : Order::nextSerialFor($business->id),
                 'business_id' => $business->id,
                 'customer_id' => $customer->id,
                 'table_id' => $table?->id,
@@ -217,6 +219,7 @@ class OrderService
 
             $order = Order::create([
                 'token' => $this->uniqueToken($business),
+                'serial' => Order::nextSerialFor($business->id),
                 'business_id' => $business->id,
                 'customer_id' => $customer?->id,
                 'source' => 'counter',
@@ -303,6 +306,196 @@ class OrderService
     private function customerByPhone(?string $phone): ?User
     {
         return $phone === null ? null : User::where('phone', $phone)->first();
+    }
+
+    /**
+     * The shop changes an order still in play (new or accepted): moves it to
+     * another table, changes quantities (0 removes a line) and adds items.
+     * The bill is worked out again -- bill discount, coupon, coins -- and stock
+     * follows the change. An order paid online can't drop below what was paid.
+     *
+     * @param  array{table?: ?string, quantities?: array<int|string, int>, add?: list<array<string, mixed>>}  $changes
+     *
+     * @throws ValidationException
+     */
+    public function edit(Order $order, array $changes): Order
+    {
+        if (! in_array($order->status, [OrderStatus::Placed, OrderStatus::Confirmed], true)) {
+            throw ValidationException::withMessages([
+                'order' => ['Only new or accepted orders can be changed.'],
+            ]);
+        }
+
+        [$order, $tableChanged, $itemsChanged] = DB::transaction(function () use ($order, $changes): array {
+            /** @var Order $order */
+            $order = Order::whereKey($order->id)->lockForUpdate()->with('items', 'business')->firstOrFail();
+            $business = $order->business;
+            $tableChanged = false;
+            $itemsChanged = false;
+
+            if (array_key_exists('table', $changes)) {
+                $uuid = $changes['table'];
+                if ($uuid === null || $uuid === '') {
+                    $order->table_id = null;
+                } else {
+                    if ($order->service_type === ServiceType::Delivery) {
+                        throw ValidationException::withMessages(['table' => ['A delivery order has no table.']]);
+                    }
+                    $table = $business->tables()->where('uuid', $uuid)->where('status', 'active')->first();
+                    if ($table === null) {
+                        throw ValidationException::withMessages(['table' => ['That table is not available.']]);
+                    }
+                    $order->table_id = $table->id;
+                    $order->service_type = ServiceType::DineIn;
+                }
+                $tableChanged = $order->isDirty('table_id');
+            }
+
+            $needs = [];
+            $giveBack = [];
+            foreach ($changes['quantities'] ?? [] as $itemId => $qty) {
+                $line = $order->items->firstWhere('id', (int) $itemId);
+                if ($line === null) {
+                    throw ValidationException::withMessages(['items' => ['An item in this change is not on the order.']]);
+                }
+                $qty = max(0, (int) $qty);
+                $delta = $qty - (int) $line->quantity;
+                if ($delta === 0) {
+                    continue;
+                }
+                foreach ($this->unitsOf($line) as $productId => $units) {
+                    if ($delta > 0) {
+                        $needs[$productId] = ($needs[$productId] ?? 0) + $units * $delta;
+                    } else {
+                        $giveBack[$productId] = ($giveBack[$productId] ?? 0) + $units * -$delta;
+                    }
+                }
+                $qty === 0 ? $line->delete() : $line->update(['quantity' => $qty]);
+                $itemsChanged = true;
+            }
+
+            if (! empty($changes['add'])) {
+                $priced = $this->priceItems($business, $changes['add']);
+                foreach ($priced['lines'] as $line) {
+                    $order->items()->create($line);
+                }
+                foreach ($priced['stockNeeds'] as $productId => $units) {
+                    $needs[$productId] = ($needs[$productId] ?? 0) + $units;
+                }
+                $itemsChanged = true;
+            }
+
+            $held = $order->stock_deducted ?? [];
+            foreach ($this->stock->deduct($needs) as $productId => $units) {
+                $held[$productId] = ($held[$productId] ?? 0) + $units;
+            }
+            foreach ($this->stock->giveBack($giveBack, $held) as $productId => $units) {
+                $held[$productId] = ($held[$productId] ?? 0) - $units;
+            }
+            $held = array_filter($held, fn ($units) => $units > 0);
+            $order->stock_deducted = $held === [] ? null : $held;
+
+            if ($itemsChanged) {
+                $this->reprice($order);
+            }
+            $order->save();
+
+            return [$order, $tableChanged, $itemsChanged];
+        });
+
+        $order->load('diningTable', 'customer', 'business');
+        if (($tableChanged || $itemsChanged) && $order->customer) {
+            $what = collect([
+                $tableChanged ? ($order->diningTable ? "now at table {$order->diningTable->label}" : 'table removed') : null,
+                $itemsChanged ? 'items changed, new total Rs '.(float) $order->total : null,
+            ])->filter()->join(' · ');
+            $this->notifications->notify(
+                $order->customer,
+                NotificationType::OrderUpdate,
+                'Order updated',
+                "{$order->business->name} updated your order {$order->token}: {$what}.",
+                ['link' => '/orders'],
+            );
+        }
+
+        return $order->fresh(['items', 'diningTable']);
+    }
+
+    /**
+     * Products one unit of an order line uses (a combo: each of its items).
+     *
+     * @return array<int, int>
+     */
+    private function unitsOf(\App\Models\OrderItem $line): array
+    {
+        if ($line->product_id !== null) {
+            return [$line->product_id => 1];
+        }
+        $units = [];
+        $combo = $line->combo_id ? Combo::with('items')->find($line->combo_id) : null;
+        foreach ($combo?->items ?? [] as $comboItem) {
+            if ($comboItem->product_id !== null) {
+                $units[$comboItem->product_id] = ($units[$comboItem->product_id] ?? 0) + max(1, (int) $comboItem->quantity);
+            }
+        }
+
+        return $units;
+    }
+
+    /**
+     * Work an edited order's bill out again from its lines (their prices stay
+     * as they were when added). Coins spent beyond the new bill go back.
+     *
+     * @throws ValidationException
+     */
+    private function reprice(Order $order): void
+    {
+        $order->load('items');
+        if ($order->items->isEmpty()) {
+            throw ValidationException::withMessages(['items' => ['An order needs at least one item. Cancel it instead.']]);
+        }
+
+        $subtotal = round((float) $order->items->sum(fn ($i) => (float) $i->unit_price * (int) $i->quantity), 2);
+        $billDiscount = 0.0;
+        $couponDiscount = 0.0;
+        if ($order->coupon_id !== null) {
+            $coupon = Coupon::withTrashed()->find($order->coupon_id);
+            if ($coupon !== null && ($coupon->min_bill === null || $subtotal >= (float) $coupon->min_bill)) {
+                $couponDiscount = $coupon->discountFor($subtotal);
+            }
+        } else {
+            $billDiscount = $this->rewards->billDiscount($order->business, $subtotal);
+        }
+        $discounted = max(0.0, round($subtotal - $billDiscount - $couponDiscount, 2));
+
+        $coinValue = max(1, (int) config('loyalty.coin_value', 1));
+        $coinsUsed = (int) min((int) $order->coins_used, floor($discounted / $coinValue));
+        if ($coinsUsed < (int) $order->coins_used && $order->customer) {
+            $this->loyalty->refund($order->customer, (int) $order->coins_used - $coinsUsed, $order->business, $order, "Coins back: order {$order->token} changed");
+        }
+        $coinDiscount = round($coinsUsed * $coinValue, 2);
+
+        $total = round($discounted - $coinDiscount + (float) $order->delivery_fee, 2);
+        $paidOnline = $order->isPaidOnline() ? (float) $order->online_amount : 0.0;
+        if ($total < $paidOnline) {
+            throw ValidationException::withMessages(['items' => [
+                "Rs {$paidOnline} was paid online, so the bill can't go below that. Cancel the order to refund it instead.",
+            ]]);
+        }
+        $fees = $this->fees->split($total, $paidOnline);
+
+        $order->fill([
+            'subtotal' => $subtotal,
+            'bill_discount' => $billDiscount,
+            'coupon_discount' => $couponDiscount,
+            'coins_used' => $coinsUsed,
+            'coin_discount' => $coinDiscount,
+            'total' => $total,
+            'coins_earned' => (int) $order->items->sum(fn ($i) => (int) $i->coins_earned * (int) $i->quantity),
+            'platform_fee' => $fees['platform'],
+            'gateway_fee' => $fees['gateway'],
+            'vendor_earning' => $fees['vendor'],
+        ]);
     }
 
     /**

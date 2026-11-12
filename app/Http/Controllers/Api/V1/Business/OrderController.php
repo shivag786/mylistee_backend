@@ -50,7 +50,8 @@ class OrderController extends Controller
             // it is not an order yet, and the customer may never pay for it.
             ->where('status', '!=', OrderStatus::AwaitingPayment->value)
             ->with(['items', 'customer:id,name', 'diningTable:id,label'])
-            ->when($request->string('status')->trim()->value(), fn ($q, $s) => $q->where('status', $s))
+            // `all` = every status (today's orders, say, with from/to).
+            ->when($request->string('status')->trim()->value(), fn ($q, $s) => $s === 'all' ? $q : $q->where('status', $s))
             ->when(
                 $request->string('since')->trim()->value(),
                 fn ($q, $since) => $q->where('created_at', '>', $since),
@@ -188,6 +189,39 @@ class OrderController extends Controller
             new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
             "Order #{$order->token} created.",
             status: 201,
+        );
+    }
+
+    /**
+     * PATCH /business/orders/{uuid} -- change an order still in play:
+     * `table` (uuid, or null to clear), `quantities` {orderItemId: qty, 0 removes},
+     * `add` [cart items].
+     */
+    public function update(Request $request, string $uuid): JsonResponse
+    {
+        $order = $this->business($request)->orders()->where('uuid', $uuid)->first();
+        if ($order === null) {
+            return ApiResponse::error('Order not found.', status: 404);
+        }
+
+        $validated = $request->validate([
+            'table' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'quantities' => ['sometimes', 'array', 'max:100'],
+            'quantities.*' => ['integer', 'min:0', 'max:99'],
+            'add' => ['sometimes', 'array', 'max:50'],
+            'add.*.type' => ['required', Rule::in(['product', 'combo'])],
+            'add.*.id' => ['required', 'string'],
+            'add.*.quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'add.*.variant' => ['nullable', 'string', 'max:16'],
+            'add.*.addons' => ['nullable', 'array', 'max:20'],
+            'add.*.addons.*' => ['string', 'max:16'],
+        ]);
+
+        $order = $this->orders->edit($order, $validated);
+
+        return ApiResponse::success(
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            "Order #{$order->token} updated.",
         );
     }
 

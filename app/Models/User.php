@@ -9,6 +9,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -127,10 +128,43 @@ class User extends Authenticatable
         return $this->hasMany(Business::class, 'owner_id');
     }
 
-    /** The owner's primary business (one per owner in the current plan), or null. */
+    /**
+     * The owner's primary business (one per owner in the current plan), or
+     * null. For staff: the shop they work at, while they are active there.
+     */
     public function business(): ?Business
     {
+        if ($this->role === UserRole::Staff) {
+            $staff = $this->staffProfile;
+
+            return $staff !== null && $staff->active ? $staff->business : null;
+        }
+
         return $this->businesses()->latest('id')->first();
+    }
+
+    /** Where this user works, when they are staff. @return HasOne<BusinessStaff, $this> */
+    public function staffProfile(): HasOne
+    {
+        return $this->hasOne(BusinessStaff::class);
+    }
+
+    public function isStaff(): bool
+    {
+        return $this->role === UserRole::Staff;
+    }
+
+    /**
+     * May this user do [$permission] at their shop? Owners may do anything;
+     * staff only what the owner ticked (config/staff_permissions.php).
+     */
+    public function canAtShop(string $permission): bool
+    {
+        if ($this->role === UserRole::BusinessOwner) {
+            return true;
+        }
+
+        return $this->role === UserRole::Staff && (bool) $this->staffProfile?->allows($permission);
     }
 
     /** Rotating wallet tokens (Phase 7.3). @return HasMany<CustomerToken, $this> */

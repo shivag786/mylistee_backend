@@ -38,6 +38,7 @@ class ProductResource extends JsonResource
             'categoryName' => $this->whenLoaded('category', fn () => $this->category?->name),
             'mrp' => $mrp,
             'sellingPrice' => $selling,
+            'taxRate' => $this->tax_rate !== null ? (float) $this->tax_rate : null,
             'discountPercent' => $mrp !== null && $mrp > $selling ? (int) round(($mrp - $selling) / $mrp * 100) : 0,
             // Effective price after the best active promotion (Phase 7.2b) — only
             // when promotions are loaded, so the base resource stays cheap.

@@ -34,5 +34,10 @@ return [
     'reviews' => ['name' => 'Review replies', 'description' => 'Reply to and hide reviews', 'group' => 'Know your customers', 'paths' => ['reviews']],
     'analytics' => ['name' => 'Analytics', 'description' => 'Sales and visit insights', 'group' => 'Know your customers', 'paths' => ['analytics'], 'readLocked' => true],
     'reels' => ['name' => 'Reels', 'description' => 'Short videos on the customer home page', 'group' => 'Get seen', 'paths' => ['reels']],
+    // Restaurant POS (Nov 2026). A plan may charge these per use: `fee` on the
+    // plan's module entry, per `feeUnit` (ModuleUsageService records the units).
+    'billing' => ['name' => 'GST billing & day close', 'description' => 'GST bills with invoice numbers, day-end report and cash count', 'group' => 'Run your shop', 'paths' => ['billing', 'day-report', 'day-close', 'cash-movements'], 'feeUnit' => 'order'],
+    'staff' => ['name' => 'Staff & roles', 'description' => 'Staff sign in with their own PIN and only see what you allow', 'group' => 'Run your shop', 'paths' => ['staff'], 'feeUnit' => 'staff_month'],
+    'attendance' => ['name' => 'Staff attendance', 'description' => 'Selfie check in/out, late alerts and a monthly summary', 'group' => 'Run your shop', 'paths' => ['attendance'], 'feeUnit' => 'staff_month'],
     'store_mode' => ['name' => 'Store mode', 'description' => 'Link / QR visitors stay inside this shop', 'group' => 'Get seen', 'paths' => []],
 ];

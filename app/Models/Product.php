@@ -27,6 +27,7 @@ class Product extends Model
         'image_path',
         'mrp',
         'selling_price',
+        'tax_rate',
         'options',
         'food_type',
         'available_from',

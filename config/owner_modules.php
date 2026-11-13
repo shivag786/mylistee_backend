@@ -28,4 +28,7 @@ return [
     'qr' => ['name' => 'QR code', 'description' => 'Business QR code'],
     'notifications' => ['name' => 'Notify customers', 'description' => 'Push notifications to followers and customers (monthly reach set per plan)'],
     'whatsapp' => ['name' => 'WhatsApp offers', 'description' => 'Ready-made WhatsApp offer templates sent to customers (monthly messages set per plan)'],
+    'billing' => ['name' => 'GST billing & day close', 'description' => 'GST bills, invoice numbers, day-end report and cash count'],
+    'staff' => ['name' => 'Staff & roles', 'description' => 'Staff logins with permissions, and alerts on what they do'],
+    'attendance' => ['name' => 'Staff attendance', 'description' => 'Selfie + GPS or shop-tablet check in/out, late alerts, monthly summary'],
 ];

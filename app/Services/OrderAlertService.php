@@ -38,7 +38,19 @@ class OrderAlertService
             return;
         }
 
-        DB::afterCommit(fn () => $this->send($owner, $order, $paymentLine));
+        // The owner, and staff who take or make orders (their phones ring too).
+        $people = [$owner];
+        foreach ($order->business->staff()->where('active', true)->with('user')->get() as $staff) {
+            if ($staff->user && ($staff->allows('take_orders') || $staff->allows('settle_bills') || $staff->allows('kitchen'))) {
+                $people[] = $staff->user;
+            }
+        }
+
+        DB::afterCommit(function () use ($people, $order, $paymentLine): void {
+            foreach ($people as $person) {
+                $this->send($person, $order, $paymentLine);
+            }
+        });
     }
 
     /** A sample alert, so an owner can check this phone rings. */

@@ -25,6 +25,7 @@ class Combo extends Model
         'name',
         'image_path',
         'combo_price',
+        'tax_rate',
         'coins_earned',
         'wallet_coins_accepted',
         'coins_accepted',

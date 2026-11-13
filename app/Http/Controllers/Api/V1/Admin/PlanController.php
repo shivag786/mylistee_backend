@@ -163,6 +163,8 @@ class PlanController extends Controller
             'modules' => [...$opt, 'array'],
             'modules.*.on' => ['required', 'boolean'],
             'modules.*.days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+            // Per-use charge for modules priced that way (billing: per order, staff: per staff a month).
+            'modules.*.fee' => ['nullable', 'numeric', 'min:0', 'max:100000'],
             'introPrice' => [...$opt, 'numeric', 'min:0'],
             'introDays' => [...$opt, 'integer', 'min:1', 'max:3650', 'required_with:introPrice'],
             'introEndsAt' => [...$opt, 'date'],
@@ -212,11 +214,15 @@ class PlanController extends Controller
         } elseif (($payload['duration_days'] ?? null) !== null) {
             $payload['duration_months'] = null;
         }
-        // Only known modules, stored as {on, days}.
+        // Only known modules, stored as {on, days[, fee]}.
         if (isset($payload['modules']) && is_array($payload['modules'])) {
             $payload['modules'] = collect($payload['modules'])
                 ->only(array_keys(\App\Services\PlanAccessService::modules()))
-                ->map(fn ($m) => ['on' => (bool) $m['on'], 'days' => isset($m['days']) ? (int) $m['days'] : null])
+                ->map(fn ($m) => array_filter([
+                    'on' => (bool) $m['on'],
+                    'days' => isset($m['days']) ? (int) $m['days'] : null,
+                    'fee' => isset($m['fee']) && (float) $m['fee'] > 0 ? round((float) $m['fee'], 2) : null,
+                ], fn ($v, $k) => $k !== 'fee' || $v !== null, ARRAY_FILTER_USE_BOTH))
                 ->all();
         }
 

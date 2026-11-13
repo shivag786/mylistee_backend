@@ -25,6 +25,7 @@ class OrderItemResource extends JsonResource
             'unitPrice' => (float) $this->unit_price,
             'quantity' => (int) $this->quantity,
             'lineTotal' => $this->lineTotal(),
+            'taxRate' => $this->tax_rate !== null ? (float) $this->tax_rate : null,
         ];
     }
 }

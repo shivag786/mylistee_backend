@@ -84,6 +84,7 @@ class ComboController extends Controller
             // Optional: left blank, the combo is named after its items.
             'name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'combo_price' => [$required ? 'required' : 'sometimes', 'numeric', 'min:0', 'max:9999999'],
+            'tax_rate' => ['nullable', 'numeric', \Illuminate\Validation\Rule::in([0, 0.25, 3, 5, 12, 18, 28])],
             'product_category_id' => ['nullable', 'string'],
             'coins_earned' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'wallet_coins_accepted' => ['nullable', 'boolean'],

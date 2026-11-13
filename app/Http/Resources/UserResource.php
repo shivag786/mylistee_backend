@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -30,6 +31,17 @@ class UserResource extends JsonResource
             // Whether mobile + PIN sign-in works for this account. A Google-only
             // customer has none, so "change PIN" means nothing to them.
             'hasPin' => $this->pin !== null,
+            // Staff: where they work and what the owner lets them do, so the
+            // app shows only those screens.
+            $this->mergeWhen($this->role === UserRole::Staff, fn () => [
+                'staff' => $this->staffProfile ? [
+                    'id' => $this->staffProfile->uuid,
+                    'role' => $this->staffProfile->role,
+                    'permissions' => array_values($this->staffProfile->permissions ?? []),
+                    'maxDiscountPercent' => $this->staffProfile->max_discount_percent !== null ? (float) $this->staffProfile->max_discount_percent : null,
+                    'phone' => $this->staffProfile->phone,
+                ] : null,
+            ]),
         ];
     }
 }

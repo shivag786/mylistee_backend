@@ -18,6 +18,9 @@ class OrderItem extends Model
         'name',
         'options',
         'unit_price',
+        'tax_rate',
+        'taxable_value',
+        'tax_amount',
         'quantity',
         'coins_earned',
     ];

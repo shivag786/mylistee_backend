@@ -143,6 +143,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::post('register-customer', [AuthController::class, 'registerCustomer'])
             ->middleware('throttle:5,1')
             ->name('auth.register-customer');
+        // Staff sign-in: the shop's code, their mobile and PIN.
+        Route::post('staff-login', [AuthController::class, 'staffLogin'])
+            ->middleware('throttle:10,1')
+            ->name('auth.staff-login');
         Route::post('register-owner', [AuthController::class, 'registerOwner'])
             ->middleware('throttle:10,1')
             ->name('auth.register-owner');
@@ -247,8 +251,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::delete('notifications/{uuid}', [NotificationController::class, 'destroy'])->name('notifications.destroy');
     });
 
-    // Business owner (document/phase/07, phase/11 §Business Owner Endpoints)
-    Route::middleware(['auth:sanctum', 'active', 'role:business_owner'])
+    // Business owner (document/phase/07, phase/11 §Business Owner Endpoints).
+    // Staff use the same routes, limited by config/staff_permissions.php.
+    Route::middleware(['auth:sanctum', 'active', 'role:business_owner,staff', 'staff.permissions'])
         ->prefix('business')
         ->name('business.')
         ->group(function (): void {
@@ -417,6 +422,41 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::patch('reels/{uuid}/visibility', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'visibility'])->name('reels.visibility');
             Route::delete('reels/{uuid}', [\App\Http\Controllers\Api\V1\Business\ReelController::class, 'destroy'])->name('reels.destroy');
 
+            // GST billing settings, day-end report, cash drawer, day close.
+            Route::get('billing', [\App\Http\Controllers\Api\V1\Business\BillingController::class, 'show'])->name('billing.show');
+            Route::put('billing', [\App\Http\Controllers\Api\V1\Business\BillingController::class, 'update'])->name('billing.update');
+            Route::get('day-report', [\App\Http\Controllers\Api\V1\Business\DayReportController::class, 'show'])->name('day-report');
+            Route::get('day-close', [\App\Http\Controllers\Api\V1\Business\DayReportController::class, 'index'])->name('day-close.index');
+            Route::post('day-close', [\App\Http\Controllers\Api\V1\Business\DayReportController::class, 'close'])->name('day-close.store');
+            Route::post('cash-movements', [\App\Http\Controllers\Api\V1\Business\DayReportController::class, 'storeMovement'])->name('cash-movements.store');
+            Route::delete('cash-movements/{uuid}', [\App\Http\Controllers\Api\V1\Business\DayReportController::class, 'destroyMovement'])->name('cash-movements.destroy');
+
+            // Staff & roles.
+            Route::get('staff', [\App\Http\Controllers\Api\V1\Business\StaffController::class, 'index'])->name('staff.index');
+            Route::post('staff', [\App\Http\Controllers\Api\V1\Business\StaffController::class, 'store'])->name('staff.store');
+            Route::put('staff/{uuid}', [\App\Http\Controllers\Api\V1\Business\StaffController::class, 'update'])->name('staff.update');
+            Route::delete('staff/{uuid}', [\App\Http\Controllers\Api\V1\Business\StaffController::class, 'destroy'])->name('staff.destroy');
+
+            // Attendance — literal paths before the {staff}/{date} wildcard.
+            Route::post('attendance/punch', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'punch'])
+                ->middleware('throttle:20,1')->name('attendance.punch');
+            Route::post('attendance/kiosk', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'kiosk'])
+                ->middleware('throttle:30,1')->name('attendance.kiosk');
+            Route::get('attendance', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'day'])->name('attendance.day');
+            Route::get('attendance/month', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'month'])->name('attendance.month');
+            Route::get('attendance/me', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'me'])->name('attendance.me');
+            Route::get('attendance/settings', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'settings'])->name('attendance.settings');
+            Route::put('attendance/settings', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'updateSettings'])->name('attendance.settings.update');
+            Route::get('attendance/photo/{uuid}/{which}', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'photo'])
+                ->where('which', 'in|out')->name('attendance.photo');
+            Route::put('attendance/{staff}/{date}', [\App\Http\Controllers\Api\V1\Business\AttendanceController::class, 'mark'])->name('attendance.mark');
+
+            // Owner alerts.
+            Route::get('alerts', [\App\Http\Controllers\Api\V1\Business\AlertController::class, 'index'])->name('alerts.index');
+            Route::post('alerts/read', [\App\Http\Controllers\Api\V1\Business\AlertController::class, 'read'])->name('alerts.read');
+            Route::get('alerts/settings', [\App\Http\Controllers\Api\V1\Business\AlertController::class, 'settings'])->name('alerts.settings');
+            Route::put('alerts/settings', [\App\Http\Controllers\Api\V1\Business\AlertController::class, 'updateSettings'])->name('alerts.settings.update');
+
             // Customer book — the shop's own customers, kept by mobile number
             Route::get('customers', [OwnerCustomerController::class, 'index'])->name('customers.index');
             Route::post('customers', [OwnerCustomerController::class, 'store'])->name('customers.store');
@@ -489,6 +529,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Plans & subscriptions
             Route::get('revenue', [RevenueController::class, 'index'])->name('revenue.index');
+            // Per-use module charges (GST billing per bill, staff/attendance per staff a month).
+            Route::get('module-usage', [\App\Http\Controllers\Api\V1\Admin\ModuleUsageController::class, 'index'])->name('module-usage.index');
             Route::get('plans', [AdminPlanController::class, 'index'])->name('plans.index');
             Route::post('plans', [AdminPlanController::class, 'store'])->name('plans.store');
             Route::patch('plans/{key}', [AdminPlanController::class, 'update'])->name('plans.update');

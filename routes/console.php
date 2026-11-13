@@ -22,3 +22,7 @@ Schedule::command('orders:release-unpaid')->everyFiveMinutes()->withoutOverlappi
 
 // Birthdays and anniversaries two days out, to customers (OccasionService).
 Schedule::command('occasions:remind')->dailyAt('09:00')->timezone(config('app.business_timezone'))->withoutOverlapping();
+
+// Owner alerts that depend on the time: a customer's order still waiting,
+// staff not checked in, and the day's sales at the owner's summary time.
+Schedule::command('pos:alerts')->everyFiveMinutes()->withoutOverlapping();

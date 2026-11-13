@@ -11,6 +11,8 @@ enum UserRole: string
     case Customer = 'customer';
     case BusinessOwner = 'business_owner';
     case Admin = 'admin';
+    // Works at one shop (business_staff row); signs in with the shop code + PIN.
+    case Staff = 'staff';
 
     /** Default role assigned to a newly registered (Google) user. */
     public static function default(): self

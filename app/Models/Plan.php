@@ -118,18 +118,18 @@ class Plan extends Model
      * behaviour: everything on, except store mode and push, which followed the
      * feature list.
      *
-     * @return array{on: bool, days: int|null}
+     * @return array{on: bool, days: int|null, fee: float|null}
      */
     public function moduleConfig(string $module): array
     {
         if ($this->modules === null) {
             // WhatsApp costs per message: never on for a plan nobody has set up.
             if ($module === 'whatsapp' || $module === 'ai_assistant') {
-                return ['on' => false, 'days' => null];
+                return ['on' => false, 'days' => null, 'fee' => null];
             }
             $legacy = ['store_mode' => 'store_mode', 'notifications' => 'push_notifications'][$module] ?? null;
 
-            return ['on' => $legacy === null || in_array($legacy, $this->features ?? [], true), 'days' => null];
+            return ['on' => $legacy === null || in_array($legacy, $this->features ?? [], true), 'days' => null, 'fee' => null];
         }
 
         // Rewards were part of "loyalty" until they got their own switch: a plan
@@ -138,18 +138,30 @@ class Plan extends Model
             return $this->moduleConfig('loyalty');
         }
 
+        // Modules added after a plan was set up (the restaurant POS ones) start
+        // on for it, until the admin edits the plan and decides.
+        if (in_array($module, self::LATER_MODULES, true) && ! array_key_exists($module, $this->modules)) {
+            return ['on' => true, 'days' => null, 'fee' => null];
+        }
+
         $entry = $this->modules[$module] ?? null;
         if (is_bool($entry)) {
-            return ['on' => $entry, 'days' => null];
+            return ['on' => $entry, 'days' => null, 'fee' => null];
         }
 
         $days = $entry['days'] ?? null;
+        $fee = $entry['fee'] ?? null;
 
         return [
             'on' => (bool) ($entry['on'] ?? false),
             'days' => $days === null || $days === '' ? null : max(1, (int) $days),
+            // Charged per use (config plan_modules.*.feeUnit), on top of the price.
+            'fee' => $fee === null || $fee === '' || (float) $fee <= 0 ? null : round((float) $fee, 2),
         ];
     }
+
+    /** Modules that came after plans were first set up; on until a plan says otherwise. */
+    public const LATER_MODULES = ['billing', 'staff', 'attendance'];
 
     /**
      * When one period of this plan, starting at $from, ends: the admin's days or

@@ -50,6 +50,19 @@ class StockService
             $product->stock_qty = $left;
             if ($left === 0) {
                 $product->in_stock = false;
+                // The owner hears once a day per dish that it sold out.
+                $business = $product->business;
+                if ($business !== null) {
+                    app(OwnerAlertService::class)->raise(
+                        $business,
+                        'low_stock',
+                        "{$product->name} is sold out",
+                        'Its stock reached 0, so customers can\'t order it. Add stock in Menu when it\'s back.',
+                        'info',
+                        ['productId' => $product->uuid],
+                        dedupeKey: 'stock:'.$product->id.':'.now()->toDateString(),
+                    );
+                }
             }
             $product->save();
             $taken[$product->id] = $need;

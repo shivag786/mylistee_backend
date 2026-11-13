@@ -26,6 +26,7 @@ class ComboResource extends JsonResource
             'name' => $this->name,
             'imageUrl' => $this->image_path ? Storage::disk('public')->url($this->image_path) : null,
             'comboPrice' => (float) $this->combo_price,
+            'taxRate' => $this->tax_rate !== null ? (float) $this->tax_rate : null,
             'totalPrice' => $this->totalPrice(),
             'totalMrp' => $this->totalMrp(),
             'savings' => $this->savings(),

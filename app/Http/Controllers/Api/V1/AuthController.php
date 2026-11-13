@@ -56,6 +56,25 @@ class AuthController extends Controller
     }
 
     /**
+     * Staff sign-in: shop code + mobile + PIN. POST /api/v1/auth/staff-login
+     */
+    public function staffLogin(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'shopCode' => ['required', 'string', 'max:8'],
+            'mobile' => ['required', 'string', 'max:16'],
+            'pin' => ['required', 'string', 'max:8'],
+        ]);
+
+        $session = app(\App\Services\StaffService::class)->login($validated['shopCode'], $validated['mobile'], $validated['pin']);
+
+        return ApiResponse::success(
+            data: $this->sessionPayload($session),
+            message: 'Signed in successfully.',
+        );
+    }
+
+    /**
      * Public business-owner sign-up (mobile + PIN).
      * POST /api/v1/auth/register-owner (public, throttled).
      */

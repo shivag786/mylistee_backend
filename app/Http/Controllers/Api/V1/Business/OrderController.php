@@ -49,7 +49,7 @@ class OrderController extends Controller
             // below, and an unpaid order must not reach the shop by either road:
             // it is not an order yet, and the customer may never pay for it.
             ->where('status', '!=', OrderStatus::AwaitingPayment->value)
-            ->with(['items', 'customer:id,name', 'diningTable:id,label'])
+            ->with(['items', 'customer:id,name', 'diningTable:id,label', 'creator:id,name'])
             // `all` = every status (today's orders, say, with from/to).
             ->when($request->string('status')->trim()->value(), fn ($q, $s) => $s === 'all' ? $q : $q->where('status', $s))
             ->when(
@@ -167,9 +167,17 @@ class OrderController extends Controller
             'paid' => ['nullable', Rule::in(PaymentMethod::values())],
             'customerPhone' => ['nullable', 'string', 'regex:/^(\+?91)?[6-9]\d{9}$/'],
             'couponCode' => ['nullable', 'string', 'max:40'],
+            // A discount at the counter: percent or a fixed amount, with why.
+            'discount' => ['nullable', 'array'],
+            'discount.type' => ['required_with:discount', Rule::in(['percent', 'amount'])],
+            'discount.value' => ['required_with:discount', 'numeric', 'min:0', 'max:9999999'],
+            'discount.reason' => ['nullable', 'string', 'max:120'],
         ], [
             'customerPhone.regex' => 'Enter a valid 10-digit mobile number.',
         ]);
+        if (isset($validated['paid']) && ! $request->user()->canAtShop('settle_bills')) {
+            return ApiResponse::error('You are not allowed to collect payment. Please ask the owner.', status: 403);
+        }
 
         $order = $this->orders->placeAtCounter(
             $business,
@@ -183,10 +191,11 @@ class OrderController extends Controller
             isset($validated['paid']) ? PaymentMethod::from($validated['paid']) : null,
             $validated['customerPhone'] ?? null,
             $validated['couponCode'] ?? null,
+            $validated['discount'] ?? null,
         );
 
         return ApiResponse::success(
-            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label', 'creator:id,name'])),
             "Order #{$order->token} created.",
             status: 201,
         );
@@ -215,12 +224,22 @@ class OrderController extends Controller
             'add.*.variant' => ['nullable', 'string', 'max:16'],
             'add.*.addons' => ['nullable', 'array', 'max:20'],
             'add.*.addons.*' => ['string', 'max:16'],
+            // Set (or, with value 0 / null, remove) a counter discount.
+            'discount' => ['sometimes', 'nullable', 'array'],
+            'discount.type' => ['required_with:discount.value', Rule::in(['percent', 'amount'])],
+            'discount.value' => ['nullable', 'numeric', 'min:0', 'max:9999999'],
+            'discount.reason' => ['nullable', 'string', 'max:120'],
         ]);
+        $user = $request->user();
+        $editsOrder = array_intersect_key($validated, array_flip(['table', 'quantities', 'add'])) !== [];
+        if ($editsOrder && ! $user->canAtShop('take_orders') && ! $user->canAtShop('cancel_orders')) {
+            return ApiResponse::error('You are not allowed to change orders. Please ask the owner.', status: 403);
+        }
 
-        $order = $this->orders->edit($order, $validated);
+        $order = $this->orders->edit($order, $validated, $user);
 
         return ApiResponse::success(
-            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label', 'creator:id,name'])),
             "Order #{$order->token} updated.",
         );
     }
@@ -240,7 +259,7 @@ class OrderController extends Controller
         $order = $this->orders->setKitchenStatus($order, KitchenStatus::from($validated['status']));
 
         return ApiResponse::success(
-            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label', 'creator:id,name'])),
             $order->kitchen_status === KitchenStatus::Ready ? "Order #{$order->token} is ready." : 'Order updated.',
         );
     }
@@ -250,7 +269,7 @@ class OrderController extends Controller
     {
         $order = $this->business($request)->orders()
             ->where('status', '!=', OrderStatus::AwaitingPayment->value)
-            ->with(['items', 'diningTable:id,label'])->where('uuid', $uuid)->first();
+            ->with(['items', 'diningTable:id,label', 'business'])->where('uuid', $uuid)->first();
         if ($order === null) {
             return ApiResponse::error('Order not found.', status: 404);
         }
@@ -259,16 +278,29 @@ class OrderController extends Controller
             'status' => ['required', Rule::in(['confirmed', 'paid', 'completed', 'cancelled'])],
             // Only meaningful when marking paid: how the customer paid at the counter.
             'payment_method' => ['nullable', Rule::in(PaymentMethod::values())],
+            // Why it was cancelled — the owner sees it in the alert.
+            'reason' => ['nullable', 'string', 'max:160'],
         ]);
+
+        // Staff: accepting needs "take orders", payment "collect payment",
+        // cancelling "cancel orders".
+        $needs = match ($validated['status']) {
+            'confirmed' => 'take_orders',
+            'paid', 'completed' => 'settle_bills',
+            default => 'cancel_orders',
+        };
+        if (! $request->user()->canAtShop($needs)) {
+            return ApiResponse::error('You don\'t have access to this. Please ask the owner.', ['permission' => [$needs]], 403);
+        }
 
         $paymentMethod = isset($validated['payment_method'])
             ? PaymentMethod::from($validated['payment_method'])
             : null;
 
-        $order = $this->orders->transition($order, OrderStatus::from($validated['status']), $request->user(), $paymentMethod);
+        $order = $this->orders->transition($order, OrderStatus::from($validated['status']), $request->user(), $paymentMethod, $validated['reason'] ?? null);
 
         return ApiResponse::success(
-            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label'])),
+            new OrderResource($order->load(['items', 'customer:id,name', 'diningTable:id,label', 'creator:id,name'])),
             'Order updated.',
         );
     }

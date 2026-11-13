@@ -112,6 +112,10 @@ class BusinessController extends Controller
 
         $data = $this->businesses->dashboard($business);
         $data['business'] = new BusinessResource($data['business']);
+        // Staff see the shop, not its money, unless allowed to see sales.
+        if (! $request->user()->canAtShop('reports')) {
+            unset($data['sales'], $data['metrics']);
+        }
 
         return ApiResponse::success($data, 'Dashboard data.');
     }

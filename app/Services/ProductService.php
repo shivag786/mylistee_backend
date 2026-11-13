@@ -129,7 +129,7 @@ class ProductService
     private function attributes(array $data): array
     {
         $fields = [
-            'name', 'description', 'ingredients', 'mrp', 'selling_price', 'food_type',
+            'name', 'description', 'ingredients', 'mrp', 'selling_price', 'tax_rate', 'food_type',
             'available_from', 'available_to', 'prep_minutes', 'stock_qty',
         ];
         $flags = [

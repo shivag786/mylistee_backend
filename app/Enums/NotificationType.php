@@ -16,4 +16,6 @@ enum NotificationType: string
     case OrderUpdate = 'order_update';
     case ShopUpdate = 'shop_update';
     case System = 'system';
+    // For the shop owner: something staff did, cash, attendance, the day's sales.
+    case OwnerAlert = 'owner_alert';
 }

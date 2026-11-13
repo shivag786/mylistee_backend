@@ -185,6 +185,65 @@ class Business extends Model
         return $this->hasMany(Combo::class);
     }
 
+    /** POS settings (GST, business day, alerts, attendance), made with the defaults on first use. */
+    public function posSettings(): BusinessPosSetting
+    {
+        return $this->relationLoaded('posSetting') && $this->posSetting !== null
+            ? $this->posSetting
+            : tap($this->posSetting()->firstOrCreate([]), fn ($s) => $this->setRelation('posSetting', $s));
+    }
+
+    /** @return HasOne<BusinessPosSetting, $this> */
+    public function posSetting(): HasOne
+    {
+        return $this->hasOne(BusinessPosSetting::class);
+    }
+
+    /** @return HasMany<BusinessStaff, $this> */
+    public function staff(): HasMany
+    {
+        return $this->hasMany(BusinessStaff::class);
+    }
+
+    /** The short code staff type to sign in to this shop, made on first use. */
+    public function staffCode(): string
+    {
+        if ($this->staff_code === null) {
+            do {
+                // No 0/O or 1/I: read aloud and typed on a phone.
+                $code = substr(str_shuffle(str_repeat('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 3)), 0, 6);
+            } while (static::withTrashed()->where('staff_code', $code)->exists());
+            $this->forceFill(['staff_code' => $code])->saveQuietly();
+        }
+
+        return $this->staff_code;
+    }
+
+    /**
+     * The business day [$date] (Y-m-d, shop time) as a UTC window: from the
+     * shop's day-start hour that day to the same hour the next day, so a
+     * restaurant open past midnight keeps those sales on the evening's day.
+     *
+     * @return array{0: \Illuminate\Support\Carbon, 1: \Illuminate\Support\Carbon}
+     */
+    public function businessDayWindow(string $date): array
+    {
+        $zone = config('app.business_timezone', 'Asia/Kolkata');
+        $hour = $this->posSettings()->day_start_hour;
+        $start = \Illuminate\Support\Carbon::parse($date, $zone)->startOfDay()->addHours($hour);
+
+        return [$start->copy()->utc(), $start->copy()->addDay()->utc()];
+    }
+
+    /** Which business day (Y-m-d) a moment falls on, by the shop's day-start hour. */
+    public function businessDateOf(?\DateTimeInterface $moment = null): string
+    {
+        $zone = config('app.business_timezone', 'Asia/Kolkata');
+        $local = \Illuminate\Support\Carbon::instance($moment ?? now())->timezone($zone);
+
+        return $local->copy()->subHours($this->posSettings()->day_start_hour)->toDateString();
+    }
+
     /** Customer orders (Phase 7.5). @return HasMany<Order, $this> */
     public function orders(): HasMany
     {

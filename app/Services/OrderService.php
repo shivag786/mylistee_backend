@@ -41,6 +41,9 @@ class OrderService
         private readonly PlatformFeeService $fees,
         private readonly OrderAlertService $alerts,
         private readonly WhatsAppEventService $whatsapp,
+        private readonly TaxService $tax,
+        private readonly OwnerAlertService $ownerAlerts,
+        private readonly ModuleUsageService $usage,
     ) {}
 
     /**
@@ -105,7 +108,9 @@ class OrderService
             $coinsUsed = max(0, min($coinsToUse, $maxCoins));
             $coinDiscount = round($coinsUsed * $coinValue, 2);
 
-            $total = round($discounted - $coinDiscount + $deliveryFee, 2);
+            // GST, service charge and round-off, when the shop bills that way.
+            $bill = $this->tax->compute($business, self::taxLines($priced['lines']), $billDiscount + $couponDiscount + $coinDiscount, $deliveryFee, $this->tax->modeFor($business));
+            $total = $bill['total'];
             ['online' => $online, 'fee' => $fee] = $this->payments->split($business, $total, $paymentChoice);
             // Listee's cut comes out of the shop's share, not the customer's bill.
             $fees = $this->fees->split($total, $online);
@@ -147,9 +152,9 @@ class OrderService
                 'delivery_lat' => $delivery['lat'] ?? null,
                 'delivery_lng' => $delivery['lng'] ?? null,
                 'placed_at' => Carbon::now(),
-            ]);
+            ] + TaxService::orderColumns($bill));
 
-            foreach ($priced['lines'] as $line) {
+            foreach (self::withTax($priced['lines'], $bill) as $line) {
                 $order->items()->create($line);
             }
 
@@ -197,6 +202,7 @@ class OrderService
         ?PaymentMethod $paidWith = null,
         ?string $customerPhone = null,
         ?string $couponCode = null,
+        ?array $discount = null,
     ): Order {
         if ($items === []) {
             throw ValidationException::withMessages(['items' => ['Add at least one item.']]);
@@ -207,12 +213,14 @@ class OrderService
         $phone = $this->counterPhone($customerPhone);
         $customer = $this->customerByPhone($phone);
 
-        $order = DB::transaction(function () use ($business, $items, $serviceType, $table, $serviceAddress, $deliveryFee, $note, $customerLabel, $phone, $customer, $couponCode): Order {
+        $order = DB::transaction(function () use ($business, $actor, $items, $serviceType, $table, $serviceAddress, $deliveryFee, $note, $customerLabel, $phone, $customer, $couponCode, $discount): Order {
             $priced = $this->priceItems($business, $items);
             $subtotal = $priced['subtotal'];
             ['billDiscount' => $billDiscount, 'coupon' => $coupon, 'couponDiscount' => $couponDiscount]
                 = $this->discounts($business, $customer, $subtotal, $couponCode);
-            $total = round($subtotal - $billDiscount - $couponDiscount + $deliveryFee, 2);
+            $manual = $this->manualDiscount($actor, round($subtotal - $billDiscount - $couponDiscount, 2), $discount);
+            $bill = $this->tax->compute($business, self::taxLines($priced['lines']), $billDiscount + $couponDiscount + $manual['amount'], $deliveryFee, $this->tax->modeFor($business));
+            $total = $bill['total'];
             $fees = $this->fees->split($total, 0.0);
             $stockTaken = $this->stock->deduct($priced['stockNeeds']);
             $now = Carbon::now();
@@ -249,10 +257,19 @@ class OrderService
                 'delivery_phone' => $phone,
                 'placed_at' => $now,
                 'confirmed_at' => $now,
-            ]);
+                'created_by' => $actor->id,
+                'manual_discount' => $manual['amount'],
+                'manual_discount_percent' => $manual['percent'],
+                'discount_reason' => $manual['reason'],
+                'discount_by' => $manual['amount'] > 0 ? $actor->id : null,
+            ] + TaxService::orderColumns($bill));
 
-            foreach ($priced['lines'] as $line) {
+            foreach (self::withTax($priced['lines'], $bill) as $line) {
                 $order->items()->create($line);
+            }
+
+            if ($manual['amount'] > 0) {
+                $this->discountAlert($order, $actor);
             }
 
             if ($coupon !== null) {
@@ -318,15 +335,16 @@ class OrderService
      *
      * @throws ValidationException
      */
-    public function edit(Order $order, array $changes): Order
+    public function edit(Order $order, array $changes, ?User $actor = null): Order
     {
         if (! in_array($order->status, [OrderStatus::Placed, OrderStatus::Confirmed], true)) {
             throw ValidationException::withMessages([
                 'order' => ['Only new or accepted orders can be changed.'],
             ]);
         }
+        $removed = [];
 
-        [$order, $tableChanged, $itemsChanged] = DB::transaction(function () use ($order, $changes): array {
+        [$order, $tableChanged, $itemsChanged] = DB::transaction(function () use ($order, $changes, $actor, &$removed): array {
             /** @var Order $order */
             $order = Order::whereKey($order->id)->lockForUpdate()->with('items', 'business')->firstOrFail();
             $business = $order->business;
@@ -363,6 +381,14 @@ class OrderService
                 if ($delta === 0) {
                     continue;
                 }
+                // Taking food off an order the kitchen already has: only with
+                // the owner's leave, and the owner hears about it.
+                if ($delta < 0 && $order->status === OrderStatus::Confirmed) {
+                    if ($actor !== null && ! $actor->canAtShop('cancel_orders')) {
+                        throw ValidationException::withMessages(['items' => ['Only staff allowed to cancel can remove items once the kitchen has the order.']]);
+                    }
+                    $removed[] = -$delta.' × '.$line->name;
+                }
                 foreach ($this->unitsOf($line) as $productId => $units) {
                     if ($delta > 0) {
                         $needs[$productId] = ($needs[$productId] ?? 0) + $units * $delta;
@@ -395,15 +421,51 @@ class OrderService
             $held = array_filter($held, fn ($units) => $units > 0);
             $order->stock_deducted = $held === [] ? null : $held;
 
-            if ($itemsChanged) {
+            // A discount at the counter: set, changed, or taken off (value 0).
+            $discountChanged = false;
+            if (array_key_exists('discount', $changes) && $actor !== null) {
+                $order->manual_discount_percent = null;
+                $order->manual_discount = 0;
+                $order->discount_reason = null;
+                $order->discount_by = null;
+                $wanted = $changes['discount'];
+                if (is_array($wanted) && (float) ($wanted['value'] ?? 0) > 0) {
+                    $order->setRelation('items', $order->items()->get());
+                    $base = round((float) $order->items->sum(fn ($i) => (float) $i->unit_price * (int) $i->quantity)
+                        - (float) $order->bill_discount - (float) $order->coupon_discount, 2);
+                    $manual = $this->manualDiscount($actor, $base, $wanted);
+                    $order->manual_discount = $manual['amount'];
+                    $order->manual_discount_percent = $manual['percent'];
+                    $order->discount_reason = $manual['reason'];
+                    $order->discount_by = $actor->id;
+                }
+                $discountChanged = true;
+            }
+
+            if ($itemsChanged || $discountChanged) {
                 $this->reprice($order);
             }
             $order->save();
+
+            if ($discountChanged && (float) $order->manual_discount > 0 && $actor !== null) {
+                $this->discountAlert($order, $actor);
+            }
 
             return [$order, $tableChanged, $itemsChanged];
         });
 
         $order->load('diningTable', 'customer', 'business');
+        if ($removed !== [] && $actor !== null && $actor->isStaff()) {
+            $this->ownerAlerts->raise(
+                $order->business,
+                'item_removed',
+                "Item removed after KOT · Order {$order->token}",
+                implode(', ', $removed)." removed by {$actor->name}. New total ".OwnerAlertService::money((float) $order->total).'.',
+                'warning',
+                ['orderId' => $order->uuid],
+                $actor,
+            );
+        }
         if (($tableChanged || $itemsChanged) && $order->customer) {
             $what = collect([
                 $tableChanged ? ($order->diningTable ? "now at table {$order->diningTable->label}" : 'table removed') : null,
@@ -466,7 +528,12 @@ class OrderService
         } else {
             $billDiscount = $this->rewards->billDiscount($order->business, $subtotal);
         }
-        $discounted = max(0.0, round($subtotal - $billDiscount - $couponDiscount, 2));
+        // A percent discount follows the bill; a fixed one stays, but never above it.
+        $manualBase = max(0.0, round($subtotal - $billDiscount - $couponDiscount, 2));
+        $manualDiscount = $order->manual_discount_percent !== null
+            ? round($manualBase * (float) $order->manual_discount_percent / 100, 2)
+            : min((float) $order->manual_discount, $manualBase);
+        $discounted = max(0.0, round($manualBase - $manualDiscount, 2));
 
         $coinValue = max(1, (int) config('loyalty.coin_value', 1));
         $coinsUsed = (int) min((int) $order->coins_used, floor($discounted / $coinValue));
@@ -475,7 +542,18 @@ class OrderService
         }
         $coinDiscount = round($coinsUsed * $coinValue, 2);
 
-        $total = round($discounted - $coinDiscount + (float) $order->delivery_fee, 2);
+        // Taxed as the order was first priced (a settings change mid-meal doesn't flip it).
+        $bill = $this->tax->compute(
+            $order->business,
+            $order->items->map(fn ($i) => ['amount' => (float) $i->unit_price * (int) $i->quantity, 'rate' => $i->tax_rate !== null ? (float) $i->tax_rate : null])->all(),
+            $billDiscount + $couponDiscount + $manualDiscount + $coinDiscount,
+            (float) $order->delivery_fee,
+            $order->tax_mode,
+        );
+        foreach ($order->items->values() as $i => $item) {
+            $item->update(['tax_rate' => $bill['lines'][$i]['rate'], 'taxable_value' => $bill['lines'][$i]['taxable'], 'tax_amount' => $bill['lines'][$i]['tax']]);
+        }
+        $total = $bill['total'];
         $paidOnline = $order->isPaidOnline() ? (float) $order->online_amount : 0.0;
         if ($total < $paidOnline) {
             throw ValidationException::withMessages(['items' => [
@@ -488,10 +566,12 @@ class OrderService
             'subtotal' => $subtotal,
             'bill_discount' => $billDiscount,
             'coupon_discount' => $couponDiscount,
+            'manual_discount' => $manualDiscount,
             'coins_used' => $coinsUsed,
             'coin_discount' => $coinDiscount,
             'total' => $total,
             'coins_earned' => (int) $order->items->sum(fn ($i) => (int) $i->coins_earned * (int) $i->quantity),
+        ] + TaxService::orderColumns($bill) + [
             'platform_fee' => $fees['platform'],
             'gateway_fee' => $fees['gateway'],
             'vendor_earning' => $fees['vendor'],
@@ -559,6 +639,7 @@ class OrderService
         $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
         $savings = round($discounts['billDiscount'] + $discounts['couponDiscount'], 2);
         $perks = $this->rewards->perks($business, $customer);
+        $quoteBill = $this->tax->compute($business, self::taxLines($priced['lines']), $savings, $deliveryFee, $this->tax->modeFor($business));
 
         return [
             // What this order earns for next time: the come-back coupon and a stamp.
@@ -576,8 +657,17 @@ class OrderService
             'comboCoinCap' => $priced['comboCoinCap'],
             // Closed or paused: the cart says so instead of letting checkout fail.
             'acceptingOrders' => $business->acceptsOrders(),
-            // Before coins; the cart takes any coins off this.
-            'total' => round($subtotal - $savings + $deliveryFee, 2),
+            // Before coins; the cart takes any coins off this. With GST on, the
+            // tax lines below are part of it (and coins lower them a little).
+            'total' => $quoteBill['total'],
+            'tax' => $quoteBill['mode'] !== null ? [
+                'mode' => $quoteBill['mode'],
+                'cgst' => $quoteBill['cgst'],
+                'sgst' => $quoteBill['sgst'],
+                'serviceCharge' => $quoteBill['serviceCharge'],
+                'serviceChargePercent' => $quoteBill['serviceChargePercent'],
+                'roundOff' => $quoteBill['roundOff'],
+            ] : null,
             'coupons' => $this->rewards->couponsFor($business, $customer)
                 ->map(fn ($c) => $this->rewards->couponPayload($c) + [
                     'minBillMet' => $c->min_bill === null || $subtotal >= (float) $c->min_bill,
@@ -659,6 +749,7 @@ class OrderService
                     'item_type' => 'combo',
                     'name' => $combo->name,
                     'unit_price' => $unit,
+                    'tax_rate' => $combo->tax_rate !== null ? (float) $combo->tax_rate : null,
                     'quantity' => $quantity,
                     'coins_earned' => $earn,
                 ];
@@ -687,6 +778,7 @@ class OrderService
                         ? ['variant' => $variantLabel, 'addons' => $addons]
                         : null,
                     'unit_price' => $unit,
+                    'tax_rate' => $product->tax_rate !== null ? (float) $product->tax_rate : null,
                     'quantity' => $quantity,
                     'coins_earned' => 0,
                 ];
@@ -780,7 +872,7 @@ class OrderService
      *
      * @throws ValidationException
      */
-    public function transition(Order $order, OrderStatus $to, User $actor, ?PaymentMethod $paymentMethod = null): Order
+    public function transition(Order $order, OrderStatus $to, User $actor, ?PaymentMethod $paymentMethod = null, ?string $reason = null): Order
     {
         $allowed = match ($order->status) {
             OrderStatus::Placed => [OrderStatus::Confirmed, OrderStatus::Cancelled],
@@ -795,12 +887,12 @@ class OrderService
             ]);
         }
 
-        return DB::transaction(function () use ($order, $to, $actor, $paymentMethod): Order {
+        return DB::transaction(function () use ($order, $to, $actor, $paymentMethod, $reason): Order {
             match ($to) {
                 OrderStatus::Confirmed => $this->markConfirmed($order),
                 OrderStatus::Paid => $this->markPaid($order, $actor, $paymentMethod),
                 OrderStatus::Completed => $this->markCompleted($order),
-                OrderStatus::Cancelled => $this->markCancelled($order),
+                OrderStatus::Cancelled => $this->markCancelled($order, $actor, $reason),
                 default => null,
             };
 
@@ -859,6 +951,12 @@ class OrderService
                 ?? ($order->isPaidOnline() && $order->amountDue() <= 0 ? PaymentMethod::Online : PaymentMethod::Cod),
         ]);
 
+        // The bill's invoice number; a shop billing GST per bill pays per bill.
+        $this->tax->assignInvoiceNumber($order);
+        if ($order->tax_mode !== null) {
+            $this->usage->record($order->business, 'billing', $order->uuid);
+        }
+
         // Credit the coins the combos promised.
         if ($order->coins_earned > 0 && $order->customer) {
             $this->loyalty->award($order->customer, CoinSource::OrderEarn, $order->business, [
@@ -888,7 +986,7 @@ class OrderService
         }
     }
 
-    private function markCancelled(Order $order): void
+    private function markCancelled(Order $order, ?User $actor = null, ?string $reason = null): void
     {
         // Refund first: if the gateway refuses, the cancel is refused with it,
         // rather than the order going away with the customer's money still held.
@@ -896,7 +994,26 @@ class OrderService
             $this->payments->refundFor($order);
         }
 
-        $order->update(['status' => OrderStatus::Cancelled, 'cancelled_at' => Carbon::now()]);
+        $wasAccepted = $order->status === OrderStatus::Confirmed;
+        $order->update([
+            'status' => OrderStatus::Cancelled,
+            'cancelled_at' => Carbon::now(),
+            'cancelled_by' => $actor?->id,
+            'cancel_reason' => $reason !== null && trim($reason) !== '' ? mb_substr(trim($reason), 0, 160) : null,
+        ]);
+
+        if ($actor !== null && $actor->isStaff()) {
+            $this->ownerAlerts->raise(
+                $order->business,
+                'order_cancelled',
+                "Order {$order->token} cancelled by {$actor->name}",
+                trim(OwnerAlertService::money((float) $order->total).($wasAccepted ? ', after it went to the kitchen' : '').'. '
+                    .($order->cancel_reason ? "Reason: {$order->cancel_reason}" : 'No reason given.')),
+                $wasAccepted ? 'danger' : 'warning',
+                ['orderId' => $order->uuid],
+                $actor,
+            );
+        }
         $this->stock->restore($order);
         $this->rewards->release($order);
 
@@ -940,6 +1057,97 @@ class OrderService
                 'expires_at' => Carbon::now()->addDays(30),
             ]);
         }
+    }
+
+    /**
+     * A discount given at the counter: a percent or a fixed amount off what is
+     * left after the shop's own offers. Staff may give it only with the
+     * "discount" permission and up to their limit; the owner has no limit.
+     *
+     * @param  array{type?: string, value?: float|int|string, reason?: ?string}|null  $wanted
+     * @return array{amount: float, percent: ?float, reason: ?string}
+     *
+     * @throws ValidationException
+     */
+    private function manualDiscount(User $actor, float $base, ?array $wanted): array
+    {
+        $value = (float) ($wanted['value'] ?? 0);
+        if ($wanted === null || $value <= 0 || $base <= 0) {
+            return ['amount' => 0.0, 'percent' => null, 'reason' => null];
+        }
+        if (! $actor->canAtShop('discount')) {
+            throw ValidationException::withMessages(['discount' => ['You are not allowed to give discounts. Please ask the owner.']]);
+        }
+
+        $isPercent = ($wanted['type'] ?? 'percent') === 'percent';
+        $percent = $isPercent ? min(100.0, $value) : null;
+        $amount = round($isPercent ? $base * $percent / 100 : min($value, $base), 2);
+        $effective = $base > 0 ? $amount / $base * 100 : 0.0;
+
+        $limit = $actor->isStaff() ? $actor->staffProfile?->max_discount_percent : null;
+        if ($limit !== null && $effective > (float) $limit + 0.001) {
+            throw ValidationException::withMessages(['discount' => ['Your discount limit is '.rtrim(rtrim(number_format((float) $limit, 2), '0'), '.').'% of the bill.']]);
+        }
+        $reason = trim((string) ($wanted['reason'] ?? ''));
+
+        return ['amount' => $amount, 'percent' => $percent, 'reason' => $reason !== '' ? mb_substr($reason, 0, 120) : null];
+    }
+
+    /** Tell the owner about a staff discount at or above their alert limit. */
+    private function discountAlert(Order $order, User $actor): void
+    {
+        if (! $actor->isStaff()) {
+            return;
+        }
+        $base = (float) $order->subtotal - (float) $order->bill_discount - (float) $order->coupon_discount;
+        $percent = $base > 0 ? round((float) $order->manual_discount / $base * 100, 1) : 0.0;
+        $threshold = (float) ($order->business->posSettings()->alerts()['discountPercent'] ?? 10);
+        if ($percent + 0.001 < $threshold) {
+            return;
+        }
+        $this->ownerAlerts->raise(
+            $order->business,
+            'discount',
+            "{$percent}% discount by {$actor->name} · Order {$order->token}",
+            OwnerAlertService::money((float) $order->manual_discount).' off a '.OwnerAlertService::money($base).' bill. '
+                .($order->discount_reason ? "Reason: {$order->discount_reason}" : 'No reason given.'),
+            'warning',
+            ['orderId' => $order->uuid],
+            $actor,
+            "discount:{$order->uuid}:".(int) round((float) $order->manual_discount * 100),
+        );
+    }
+
+    /**
+     * Priced lines as TaxService reads them.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<array{amount: float, rate: float|null}>
+     */
+    private static function taxLines(array $lines): array
+    {
+        return array_map(fn ($l) => [
+            'amount' => (float) $l['unit_price'] * (int) $l['quantity'],
+            'rate' => $l['tax_rate'] ?? null,
+        ], $lines);
+    }
+
+    /**
+     * Priced lines with the GST each one carries, ready to save.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @param  array<string, mixed>  $bill  TaxService::compute()
+     * @return list<array<string, mixed>>
+     */
+    private static function withTax(array $lines, array $bill): array
+    {
+        foreach ($lines as $i => $line) {
+            $lines[$i]['tax_rate'] = $bill['lines'][$i]['rate'] ?? null;
+            $lines[$i]['taxable_value'] = $bill['lines'][$i]['taxable'] ?? null;
+            $lines[$i]['tax_amount'] = $bill['lines'][$i]['tax'] ?? null;
+        }
+
+        return $lines;
     }
 
     /** A short numeric token unique among the business's active orders. */

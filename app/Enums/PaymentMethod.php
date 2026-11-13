@@ -11,12 +11,17 @@ enum PaymentMethod: string
 {
     case Cod = 'cod';
     case Online = 'online';
+    // Counter split for the day-end cash count: UPI and card apart from cash.
+    case Upi = 'upi';
+    case Card = 'card';
 
     public function label(): string
     {
         return match ($this) {
             self::Cod => 'Cash',
             self::Online => 'Online',
+            self::Upi => 'UPI',
+            self::Card => 'Card',
         };
     }
 

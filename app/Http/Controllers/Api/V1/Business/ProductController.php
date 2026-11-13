@@ -175,6 +175,8 @@ class ProductController extends Controller
             'ingredients' => ['nullable', 'string', 'max:1000'],
             'mrp' => ['nullable', 'numeric', 'min:0', 'max:9999999'],
             'selling_price' => ['required', 'numeric', 'min:0', 'max:9999999'],
+            // GST rate for this dish; empty = the shop's default rate.
+            'tax_rate' => ['nullable', 'numeric', Rule::in([0, 0.25, 3, 5, 12, 18, 28])],
             'food_type' => ['nullable', Rule::enum(FoodType::class)],
             'available_from' => ['nullable', 'date_format:H:i'],
             'available_to' => ['nullable', 'date_format:H:i'],

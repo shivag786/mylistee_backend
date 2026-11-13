@@ -65,6 +65,22 @@ class Order extends Model
         'completed_at',
         'cancelled_at',
         'paid_by',
+        // GST billing & staff (POS layer)
+        'tax_mode',
+        'taxable_amount',
+        'cgst',
+        'sgst',
+        'service_charge',
+        'service_charge_percent',
+        'round_off',
+        'manual_discount',
+        'manual_discount_percent',
+        'discount_reason',
+        'invoice_no',
+        'created_by',
+        'discount_by',
+        'cancelled_by',
+        'cancel_reason',
     ];
 
     protected function casts(): array
@@ -80,6 +96,14 @@ class Order extends Model
             'vendor_earning' => 'decimal:2',
             'bill_discount' => 'decimal:2',
             'coupon_discount' => 'decimal:2',
+            'manual_discount' => 'decimal:2',
+            'manual_discount_percent' => 'decimal:2',
+            'taxable_amount' => 'decimal:2',
+            'cgst' => 'decimal:2',
+            'sgst' => 'decimal:2',
+            'service_charge' => 'decimal:2',
+            'service_charge_percent' => 'decimal:2',
+            'round_off' => 'decimal:2',
             'online_paid_at' => 'datetime',
             'subtotal' => 'decimal:2',
             'coin_discount' => 'decimal:2',
@@ -229,5 +253,23 @@ class Order extends Model
     public function coupon(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Coupon::class);
+    }
+
+    /** Who took it at the counter (owner or staff). @return BelongsTo<User, $this> */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /** Who marked it paid. @return BelongsTo<User, $this> */
+    public function payer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'paid_by');
+    }
+
+    /** Who cancelled it. @return BelongsTo<User, $this> */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

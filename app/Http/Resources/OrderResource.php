@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
 use App\Models\Order;
+use App\Services\TaxService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -76,6 +77,12 @@ class OrderResource extends JsonResource
                     ])->values()->all()),
             ] : null,
             'invoiceNo' => $this->invoice_no,
+            // Who issued the bill, for a proper tax invoice on the customer's
+            // side. Only on a single order (the list skips the extra queries).
+            'seller' => $this->when(
+                $this->tax_mode !== null && $this->relationLoaded('business') && $this->business?->relationLoaded('posSetting'),
+                fn () => $this->seller(),
+            ),
             // Listee's fee and what the shop keeps — for the shop's eyes only.
             $this->mergeWhen($request->routeIs('business.*'), fn () => [
                 'platformFee' => (float) $this->platform_fee,
@@ -118,6 +125,31 @@ class OrderResource extends JsonResource
                 'cancelReason' => $this->cancel_reason,
             ]),
             'createdAt' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function seller(): array
+    {
+        $business = $this->business;
+        $pos = $business->posSetting;
+        $gstin = $business->gst ? strtoupper((string) $business->gst) : null;
+        $taxed = ((float) $this->cgst + (float) $this->sgst) > 0;
+
+        return [
+            'name' => $business->name,
+            'legalName' => $pos?->legal_name ?: $business->name,
+            'gstin' => $gstin,
+            'fssai' => $pos?->fssai,
+            'address' => trim(implode(', ', array_filter([$business->address, $business->city]))) ?: null,
+            'phone' => $business->phone,
+            // "08 - Rajasthan": intra-state supply, so CGST + SGST.
+            'placeOfSupply' => $gstin ? TaxService::stateLabel(substr($gstin, 0, 2)) : null,
+            // Restaurant service.
+            'sac' => '996331',
+            'footer' => $pos?->bill_footer,
+            // A "Tax invoice" needs GST charged and a GSTIN; otherwise it is a bill.
+            'isTaxInvoice' => $taxed && $gstin !== null,
         ];
     }
 }

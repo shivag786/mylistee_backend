@@ -623,7 +623,7 @@ class OrderService
      *
      * @throws ValidationException for an item that can't be sold (not for a bad coupon)
      */
-    public function quote(Business $business, ?User $customer, array $items, ?string $couponCode, ?ServiceType $serviceType): array
+    public function quote(Business $business, ?User $customer, array $items, ?string $couponCode, ?ServiceType $serviceType, int $coinsToUse = 0): array
     {
         $priced = $this->priceItems($business, $items);
         $subtotal = $priced['subtotal'];
@@ -639,7 +639,15 @@ class OrderService
         $deliveryFee = $serviceType === ServiceType::Delivery ? $business->deliveryFee() : 0.0;
         $savings = round($discounts['billDiscount'] + $discounts['couponDiscount'], 2);
         $perks = $this->rewards->perks($business, $customer);
-        $quoteBill = $this->tax->compute($business, self::taxLines($priced['lines']), $savings, $deliveryFee, $this->tax->modeFor($business));
+        // Coins the cart means to spend, capped exactly as place() caps them,
+        // so a GST bill's tax (worked out after coins) matches the order.
+        $coinDiscount = 0.0;
+        if ($coinsToUse > 0 && $customer !== null) {
+            $coinValue = max(1, (int) config('loyalty.coin_value', 1));
+            $maxCoins = (int) min($this->loyalty->balanceForBusiness($customer, $business), floor(($subtotal - $savings) / $coinValue), $priced['comboCoinCap']);
+            $coinDiscount = round(max(0, min($coinsToUse, $maxCoins)) * $coinValue, 2);
+        }
+        $quoteBill = $this->tax->compute($business, self::taxLines($priced['lines']), $savings + $coinDiscount, $deliveryFee, $this->tax->modeFor($business));
 
         return [
             // What this order earns for next time: the come-back coupon and a stamp.
@@ -657,11 +665,13 @@ class OrderService
             'comboCoinCap' => $priced['comboCoinCap'],
             // Closed or paused: the cart says so instead of letting checkout fail.
             'acceptingOrders' => $business->acceptsOrders(),
-            // Before coins; the cart takes any coins off this. With GST on, the
-            // tax lines below are part of it (and coins lower them a little).
+            // After the coins sent as coinsToUse (none sent: before coins). With
+            // GST on, the tax lines below are part of it.
             'total' => $quoteBill['total'],
+            'coinDiscount' => $coinDiscount,
             'tax' => $quoteBill['mode'] !== null ? [
                 'mode' => $quoteBill['mode'],
+                'taxable' => $quoteBill['taxable'] ?? null,
                 'cgst' => $quoteBill['cgst'],
                 'sgst' => $quoteBill['sgst'],
                 'serviceCharge' => $quoteBill['serviceCharge'],

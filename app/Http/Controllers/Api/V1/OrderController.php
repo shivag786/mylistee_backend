@@ -52,7 +52,8 @@ class OrderController extends Controller
     public function show(Request $request, string $uuid): JsonResponse
     {
         $user = $request->user();
-        $order = $user->orders()->with(['items', 'business:id,name,slug', 'diningTable:id,label'])->where('uuid', $uuid)->first();
+        // The shop's GSTIN, legal name and address come along for the tax invoice.
+        $order = $user->orders()->with(['items', 'business:id,name,slug,address,city,phone,gst', 'business.posSetting', 'diningTable:id,label'])->where('uuid', $uuid)->first();
         if ($order === null) {
             return ApiResponse::error('Order not found.', status: 404);
         }
@@ -167,6 +168,7 @@ class OrderController extends Controller
             'items.*.addons.*' => ['string', 'max:16'],
             'couponCode' => ['nullable', 'string', 'max:24'],
             'serviceType' => ['nullable', Rule::in(ServiceType::values())],
+            'coinsToUse' => ['nullable', 'integer', 'min:0', 'max:100000'],
         ]);
 
         $business = Business::where('slug', $validated['business'])
@@ -182,6 +184,7 @@ class OrderController extends Controller
             $validated['items'],
             $validated['couponCode'] ?? null,
             isset($validated['serviceType']) ? ServiceType::from($validated['serviceType']) : null,
+            (int) ($validated['coinsToUse'] ?? 0),
         );
         // A plan without ordering shows the menu as a catalogue.
         $quote['acceptingOrders'] = ($quote['acceptingOrders'] ?? true) && $this->access()->orderingOpen($business);

@@ -75,6 +75,9 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     // Public
     Route::get('health', [HealthController::class, 'index'])->name('health');
+    // Privacy / Terms / Refund / Delete account… written in the admin panel.
+    Route::get('pages', [\App\Http\Controllers\Api\V1\PageController::class, 'index'])->name('pages.index');
+    Route::get('pages/{slug}', [\App\Http\Controllers\Api\V1\PageController::class, 'show'])->name('pages.show');
     Route::get('categories', [CategoryController::class, 'index'])->name('categories.index');
     Route::get('plans', [PlanController::class, 'index'])->name('plans.index');
     Route::get('businesses', [PublicBusinessController::class, 'index'])->name('businesses.index');
@@ -187,6 +190,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::post('spinner/spin', [SpinnerController::class, 'spin'])
             ->middleware('throttle:30,1')
             ->name('spinner.spin');
+
+        // Delete my account (Google Play asks for an in-app way).
+        Route::delete('account', [\App\Http\Controllers\Api\V1\AccountController::class, 'destroy'])
+            ->middleware('throttle:5,1')->name('account.destroy');
 
         // Customer profile: mobile, birthday, gender, anniversary + people they celebrate.
         Route::get('profile', [\App\Http\Controllers\Api\V1\ProfileController::class, 'show'])->name('profile.show');
@@ -590,6 +597,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::get('cms', [CmsController::class, 'index'])->name('cms.index');
             Route::get('cms/{slug}', [CmsController::class, 'show'])->name('cms.show');
             Route::put('cms/{slug}', [CmsController::class, 'update'])->name('cms.update');
+            Route::delete('cms/{slug}', [CmsController::class, 'destroy'])->name('cms.destroy');
 
             // Audit logs + report exports
             Route::get('audit-logs', [AuditLogController::class, 'index'])->name('audit');

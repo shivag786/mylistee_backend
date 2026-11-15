@@ -51,6 +51,22 @@ class AdminTest extends TestCase
             ->assertJsonPath('data.stats.totalBusinesses', 2);
     }
 
+    public function test_dashboard_lists_who_joined_lately(): void
+    {
+        $shop = Business::factory()->create(['name' => 'Chai Point']);
+        $old = User::factory()->create(['name' => 'Old', 'created_at' => now()->subDays(20)]);
+        $new = User::factory()->create(['name' => 'Asha']);
+        \App\Models\BusinessVisit::create(['business_id' => $shop->id, 'customer_id' => $new->id]);
+
+        $res = $this->withToken($this->token($this->admin()))->getJson('/api/v1/admin/dashboard')->assertOk()
+            ->assertJsonPath('data.stats.newCustomersWeek', 1)
+            ->assertJsonPath('data.stats.newBusinessesToday', 1)
+            ->assertJsonPath('data.recentCustomers.0.name', 'Asha')
+            ->assertJsonPath('data.recentCustomers.0.firstShop.name', 'Chai Point')
+            ->assertJsonPath('data.recentBusinesses.0.name', 'Chai Point');
+        $this->assertSame('Old', $res->json('data.recentCustomers.1.name'));
+    }
+
     public function test_admin_can_list_and_suspend_a_business(): void
     {
         $business = Business::factory()->create();

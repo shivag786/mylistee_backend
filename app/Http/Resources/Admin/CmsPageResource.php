@@ -22,6 +22,7 @@ class CmsPageResource extends JsonResource
             'title' => $this->title,
             'body' => $this->body,
             'status' => $this->status,
+            'core' => in_array($this->slug, \App\Http\Controllers\Api\V1\Admin\CmsController::CORE, true),
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];
     }

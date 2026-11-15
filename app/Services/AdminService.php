@@ -10,6 +10,7 @@ use App\Enums\UserStatus;
 use App\Models\Business;
 use App\Models\BusinessVisit;
 use App\Models\Invoice;
+use App\Models\Order;
 use App\Models\Offer;
 use App\Models\Reward;
 use App\Models\Spin;
@@ -57,10 +58,72 @@ class AdminService
                     ->whereMonth('issued_at', $today->month)
                     ->sum('amount'),
                 'pendingApprovals' => Business::where('status', BusinessStatus::Pending->value)->count(),
+                // Who joined lately.
+                'newCustomersToday' => User::where('role', UserRole::Customer->value)->whereDate('created_at', $today)->count(),
+                'newCustomersWeek' => User::where('role', UserRole::Customer->value)->where('created_at', '>=', $today->copy()->subDays(6))->count(),
+                'newBusinessesToday' => Business::whereDate('created_at', $today)->count(),
+                'newBusinessesWeek' => Business::where('created_at', '>=', $today->copy()->subDays(6))->count(),
+                'ordersToday' => Order::whereDate('created_at', $today)->where('status', '!=', 'awaiting_payment')->count(),
             ],
+            'recentCustomers' => $this->recentCustomers(),
+            'recentBusinesses' => $this->recentBusinesses(),
             'growth' => $this->growth(30),
             'health' => $this->health(),
         ];
+    }
+
+    /**
+     * The newest customers, and the shop that brought each in (first order,
+     * else first visit) — how the admin sees who is onboarding.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function recentCustomers(int $limit = 10): array
+    {
+        $users = User::where('role', UserRole::Customer->value)->latest('id')->limit($limit)
+            ->get(['id', 'uuid', 'name', 'phone', 'email', 'provider', 'status', 'created_at']);
+        $ids = $users->pluck('id');
+
+        $firstOrder = Order::whereIn('customer_id', $ids)->with('business:id,name,slug')->orderBy('id')
+            ->get(['id', 'customer_id', 'business_id'])->unique('customer_id')->keyBy('customer_id');
+        $firstVisit = BusinessVisit::whereIn('customer_id', $ids)->with('business:id,name,slug')->orderBy('id')
+            ->get(['id', 'customer_id', 'business_id'])->unique('customer_id')->keyBy('customer_id');
+        $orders = Order::whereIn('customer_id', $ids)->where('status', '!=', 'awaiting_payment')
+            ->groupBy('customer_id')->selectRaw('customer_id, COUNT(*) as n')->pluck('n', 'customer_id');
+
+        return $users->map(function (User $u) use ($firstOrder, $firstVisit, $orders): array {
+            $shop = $firstOrder->get($u->id)?->business ?? $firstVisit->get($u->id)?->business;
+
+            return [
+                'id' => $u->uuid,
+                'name' => $u->name,
+                'phone' => $u->phone,
+                'email' => $u->email,
+                'via' => $u->provider ?: ($u->phone ? 'phone' : 'email'),
+                'status' => $u->status instanceof UserStatus ? $u->status->value : $u->status,
+                'firstShop' => $shop ? ['name' => $shop->name, 'slug' => $shop->slug] : null,
+                'orders' => (int) ($orders[$u->id] ?? 0),
+                'joinedAt' => $u->created_at?->toIso8601String(),
+            ];
+        })->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function recentBusinesses(int $limit = 8): array
+    {
+        return Business::with(['owner:id,name,phone', 'category:id,name'])->latest('id')->limit($limit)->get()
+            ->map(fn (Business $b): array => [
+                'id' => $b->uuid,
+                'name' => $b->name,
+                'slug' => $b->slug,
+                'city' => $b->city,
+                'category' => $b->category?->name,
+                'owner' => $b->owner?->name,
+                'ownerPhone' => $b->owner?->phone,
+                'status' => $b->status instanceof BusinessStatus ? $b->status->value : $b->status,
+                'plan' => $b->currentPlan()?->name,
+                'joinedAt' => $b->created_at?->toIso8601String(),
+            ])->all();
     }
 
     /**

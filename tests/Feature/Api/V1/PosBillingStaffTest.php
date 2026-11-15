@@ -113,6 +113,38 @@ class PosBillingStaffTest extends TestCase
         $this->assertSame('PT/2627/0002', $second->json('data.invoiceNo'));
     }
 
+    public function test_the_customer_sees_a_full_tax_invoice_for_a_gst_shop(): void
+    {
+        [$owner, $business, $product] = $this->shop();
+        $business->update(['address' => 'MI Road', 'city' => 'Jaipur']);
+        $this->gst($owner, ['legalName' => 'Tikka Foods Pvt Ltd', 'fssai' => '12345678901234']);
+        $customer = User::factory()->create(['role' => \App\Enums\UserRole::Customer, 'status' => \App\Enums\UserStatus::Active]);
+
+        $id = $this->as($customer)->postJson('/api/v1/orders', [
+            'business' => $business->slug,
+            'items' => [['type' => 'product', 'id' => $product->uuid, 'quantity' => 2]],
+        ])->assertCreated()->assertJsonPath('data.tax.cgst', 5)->json('data.id');
+
+        $this->as($customer)->getJson("/api/v1/orders/{$id}")->assertOk()
+            ->assertJsonPath('data.tax.rates.0.rate', 5)
+            ->assertJsonPath('data.tax.rates.0.taxable', 200)
+            ->assertJsonPath('data.seller.gstin', '08ABCDE1234F1Z5')
+            ->assertJsonPath('data.seller.legalName', 'Tikka Foods Pvt Ltd')
+            ->assertJsonPath('data.seller.fssai', '12345678901234')
+            ->assertJsonPath('data.seller.address', 'MI Road, Jaipur')
+            ->assertJsonPath('data.seller.placeOfSupply', '08 - Rajasthan')
+            ->assertJsonPath('data.seller.isTaxInvoice', true);
+
+        // No seller block for a shop without GST.
+        [, $plain, $dish] = $this->shop();
+        $other = $this->as($customer)->postJson('/api/v1/orders', [
+            'business' => $plain->slug,
+            'items' => [['type' => 'product', 'id' => $dish->uuid, 'quantity' => 1]],
+        ])->assertCreated()->json('data.id');
+        $this->as($customer)->getJson("/api/v1/orders/{$other}")->assertOk()
+            ->assertJsonPath('data.tax', null)->assertJsonMissingPath('data.seller');
+    }
+
     public function test_tax_inclusive_prices_only_show_the_gst_inside(): void
     {
         [$owner, , $product] = $this->shop();

@@ -72,6 +72,12 @@ class Review extends Model
         return $this->hasMany(ReviewItem::class);
     }
 
+    /** Customers' flags on this review. @return HasMany<ReviewReport, $this> */
+    public function reports(): HasMany
+    {
+        return $this->hasMany(ReviewReport::class);
+    }
+
     /** Who to show as the author: the account name, else the name typed on the link form. */
     public function authorName(): ?string
     {

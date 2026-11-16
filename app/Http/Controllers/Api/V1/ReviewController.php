@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ReviewResource;
 use App\Models\Business;
 use App\Models\Review;
+use App\Models\ReviewReport;
 use App\Services\ReviewService;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -76,6 +77,35 @@ class ReviewController extends Controller
         $review = $this->reviews->upsert($user, $business, $data['rating'], $data['comment'] ?? null, $order);
 
         return ApiResponse::success(new ReviewResource($review), 'Thanks for your review!', status: 201);
+    }
+
+    /**
+     * POST /reviews/{uuid}/report { reason, note? } — flag someone else's review
+     * for the admin. Reporting the same review again just updates the reason.
+     */
+    public function report(Request $request, string $uuid): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', Rule::in(ReviewReport::REASONS)],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $review = Review::where('uuid', $uuid)->first();
+        if ($review === null) {
+            return ApiResponse::error('Review not found.', status: 404);
+        }
+
+        $user = $request->user();
+        if ($review->customer_id !== null && $review->customer_id === $user->id) {
+            return ApiResponse::error('You can\'t report your own review.', status: 422);
+        }
+
+        ReviewReport::updateOrCreate(
+            ['review_id' => $review->id, 'reporter_id' => $user->id],
+            ['reason' => $data['reason'], 'note' => $data['note'] ?? null],
+        );
+
+        return ApiResponse::success(message: 'Thanks. We\'ll look at this review.');
     }
 
     /** DELETE /reviews/{uuid} — remove the customer's own review. */

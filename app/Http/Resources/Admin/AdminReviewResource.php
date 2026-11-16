@@ -24,6 +24,13 @@ class AdminReviewResource extends JsonResource
             'customerName' => $this->authorName(),
             'businessName' => $this->business?->name,
             'businessSlug' => $this->business?->slug,
+            // Customers' flags (Report review in the app).
+            'reportsCount' => (int) ($this->reports_count ?? 0),
+            'reportReasons' => $this->whenLoaded(
+                'reports',
+                fn () => $this->reports->pluck('reason')->countBy()->all(),
+                [],
+            ),
             'createdAt' => $this->created_at?->toIso8601String(),
         ];
     }

@@ -22,9 +22,14 @@ class ReviewController extends Controller
     /** GET /admin/reviews */
     public function index(Request $request): JsonResponse
     {
+        $status = $request->string('status')->trim()->value();
+
         $query = Review::query()
-            ->with(['business:id,name,slug', 'customer:id,name'])
-            ->when($request->string('status')->trim()->value(), fn ($q, $s) => $q->where('status', $s))
+            ->with(['business:id,name,slug', 'customer:id,name', 'reports:id,review_id,reason'])
+            ->withCount('reports')
+            // "reported": reviews customers flagged, most-flagged first.
+            ->when($status === 'reported', fn ($q) => $q->has('reports')->orderByDesc('reports_count'))
+            ->when($status && $status !== 'reported', fn ($q) => $q->where('status', $status))
             ->latest('id');
 
         $page = $query->paginate((int) $request->integer('perPage', 20));
@@ -60,7 +65,7 @@ class ReviewController extends Controller
         $this->audit->log($request->user(), 'review.status', $review, "Set status to {$validated['status']}");
 
         return ApiResponse::success(
-            new AdminReviewResource($review->fresh(['business', 'customer'])),
+            new AdminReviewResource($review->fresh(['business', 'customer', 'reports'])->loadCount('reports')),
             'Review updated.',
         );
     }

@@ -246,6 +246,9 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::delete('favorites/{slug}', [FavoriteController::class, 'destroy'])->name('favorites.destroy');
 
         Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
+        Route::post('reviews/{uuid}/report', [ReviewController::class, 'report'])
+            ->middleware('throttle:20,1')
+            ->name('reviews.report');
         Route::delete('reviews/{uuid}', [ReviewController::class, 'destroy'])->name('reviews.destroy');
 
         // Notifications (document/phase/11 §Notifications, phase/13 §Push).

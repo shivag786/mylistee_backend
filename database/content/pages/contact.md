@@ -10,6 +10,6 @@ For help with your listing, plan, billing, GST bills, staff or printing, write t
 
 ## Write to us
 
-**Email:** support@listee.app
+**Email:** info@listee.org
 
 We reply within 2 working days. For privacy or data requests, see our [Privacy Policy](/p/privacy); to close your account, see [Delete account](/p/delete-account).

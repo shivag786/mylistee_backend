@@ -14,4 +14,4 @@
 - Offers, coupons, combos, loyalty and WhatsApp messages that bring customers back.
 - A simple monthly, quarterly or yearly plan — no commission on your orders.
 
-Questions? Write to **support@listee.app**.
+Questions? Write to **info@listee.org**.

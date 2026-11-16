@@ -27,4 +27,4 @@ Yes. Add staff with a role (manager, cashier, waiter, kitchen). They sign in wit
 Yes. Turn on GST billing, add your GSTIN, and connect a Bluetooth thermal printer.
 
 **Need more help?**
-Write to support@listee.app.
+Write to info@listee.org.

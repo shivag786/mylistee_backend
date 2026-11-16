@@ -15,7 +15,7 @@ class SettingService
     /** @var array<string, mixed> */
     private const DEFAULTS = [
         'brandName' => 'Listee',
-        'supportEmail' => 'support@listee.app',
+        'supportEmail' => 'info@listee.org',
         'supportPhone' => '',
         'currency' => 'INR',
         'timezone' => 'Asia/Kolkata',

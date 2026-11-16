@@ -7,7 +7,7 @@ When you pay for an order online, the payment is collected through Razorpay for 
 - **Shop cancels or rejects your order** — the amount you paid online is refunded in full, automatically.
 - **Order cancelled before the shop accepts it** — refunded in full.
 - **After the shop has accepted or started preparing** — cancellation and refund are at the shop's discretion.
-- **Wrong, missing or bad item** — tell the shop first (its number is on its Listee page). If it is not resolved, write to support@listee.app with your order token within 48 hours; we review it with the shop.
+- **Wrong, missing or bad item** — tell the shop first (its number is on its Listee page). If it is not resolved, write to info@listee.org with your order token within 48 hours; we review it with the shop.
 
 Orders paid in cash or at the shop's own terminal are refunded by the shop directly.
 
@@ -31,7 +31,7 @@ We do not refund a period already used, unused features, or an account suspended
 
 ## 4. How to ask
 
-Email **support@listee.app** from your registered number or email with your shop name, the invoice or order number, the date and amount, and what went wrong.
+Email **info@listee.org** from your registered number or email with your shop name, the invoice or order number, the date and amount, and what went wrong.
 
 | Step | Time |
 |---|---|

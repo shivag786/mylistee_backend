@@ -12,7 +12,7 @@ The business is the seller. Every product, price, tax, offer, reward and deliver
 
 - You must be 18 or older, or use Listee with a parent's consent.
 - Customers sign in with a mobile number and PIN or with Google. Owners and staff sign in with a mobile number and PIN.
-- Keep your PIN private. Anything done from your account is treated as done by you. Tell us at support@listee.app if you think someone else has access.
+- Keep your PIN private. Anything done from your account is treated as done by you. Tell us at info@listee.org if you think someone else has access.
 - One person, one account. Accounts cannot be sold or transferred.
 
 ## 3. Orders and payment
@@ -65,4 +65,4 @@ These terms are governed by Indian law. The courts at Ahmedabad, Gujarat have ju
 
 We may update these terms; the date on this page shows the current version and we will tell you in the app before a material change.
 
-**Contact:** support@listee.app
+**Contact:** info@listee.org

@@ -6,13 +6,13 @@ You can delete your Listee account and its personal data at any time. This works
 
 **Listee Business (shop owners):** More → **Delete account** → type DELETE → confirm.
 
-**Website:** sign in at listee.app → Profile → **Delete account**.
+**Website:** sign in at listee.org → Profile → **Delete account**.
 
 The account is closed straight away and you are signed out on every device.
 
 ## Can't open the app?
 
-Email **support@listee.app** from your registered email, or write from anywhere with your registered mobile number, with the subject "Delete my account". We confirm it is you and delete the account within 7 days.
+Email **info@listee.org** from your registered email, or write from anywhere with your registered mobile number, with the subject "Delete my account". We confirm it is you and delete the account within 7 days.
 
 ## What is deleted
 

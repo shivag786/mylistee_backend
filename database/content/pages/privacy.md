@@ -73,7 +73,7 @@ When you delete your account, your name, phone, email and profile are removed im
 
 ## 7. Your rights
 
-You can ask us to tell you what we hold about you, correct it, delete it, withdraw consent (for example for notifications), and nominate someone to act for you. You can delete your account yourself — see [Delete account](/p/delete-account). For anything else, write to **support@listee.app** from your registered number or email; we reply within 30 days. You may also complain to the Data Protection Board of India.
+You can ask us to tell you what we hold about you, correct it, delete it, withdraw consent (for example for notifications), and nominate someone to act for you. You can delete your account yourself — see [Delete account](/p/delete-account). For anything else, write to **info@listee.org** from your registered number or email; we reply within 30 days. You may also complain to the Data Protection Board of India.
 
 ## 8. Security
 
@@ -87,4 +87,4 @@ Listee is not meant for children under 18 without a parent's supervision. If you
 
 The date on this page shows the current version. We will tell you in the app before a material change takes effect.
 
-**Contact:** support@listee.app
+**Contact:** info@listee.org

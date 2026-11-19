@@ -26,3 +26,8 @@ Schedule::command('occasions:remind')->dailyAt('09:00')->timezone(config('app.bu
 // Owner alerts that depend on the time: a customer's order still waiting,
 // staff not checked in, and the day's sales at the owner's summary time.
 Schedule::command('pos:alerts')->everyFiveMinutes()->withoutOverlapping();
+
+// AI Sales Manager + Customer Growth Advisor: fresh ideas every night, approved
+// growth campaigns go out at their send time.
+Schedule::command('ai:advisor-nightly')->dailyAt(config('ai_advisor.nightly.at', '02:30'))->timezone(config('app.business_timezone'))->withoutOverlapping(180)->runInBackground();
+Schedule::command('ai:campaigns-send')->everyFiveMinutes()->withoutOverlapping();

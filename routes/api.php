@@ -289,6 +289,16 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
                 ->middleware('throttle:20,1')
                 ->name('ai.generate');
 
+            // AI Sales Manager + Customer Growth Advisor (plan module ai_assistant via the `ai` section).
+            Route::get('ai/advisor', [\App\Http\Controllers\Api\V1\Business\AiAdvisorController::class, 'index'])->name('ai.advisor.index');
+            Route::post('ai/advisor/refresh', [\App\Http\Controllers\Api\V1\Business\AiAdvisorController::class, 'refresh'])
+                ->middleware('throttle:6,1')
+                ->name('ai.advisor.refresh');
+            Route::post('ai/advisor/{uuid}/approve', [\App\Http\Controllers\Api\V1\Business\AiAdvisorController::class, 'approve'])
+                ->middleware('throttle:20,1')
+                ->name('ai.advisor.approve');
+            Route::post('ai/advisor/{uuid}/dismiss', [\App\Http\Controllers\Api\V1\Business\AiAdvisorController::class, 'dismiss'])->name('ai.advisor.dismiss');
+
             // AI menu scan: photos / PDF of the menu → dishes to review → products.
             // Every shop gets it (it is how a new shop fills its menu); own monthly cap.
             Route::get('menu-scan', [\App\Http\Controllers\Api\V1\Business\MenuScanController::class, 'show'])->name('menu-scan.show');

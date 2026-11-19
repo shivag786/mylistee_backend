@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PromotionStatus;
 use App\Enums\PromotionType;
+use Database\Factories\PromotionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,7 +19,7 @@ use Illuminate\Support\Str;
  */
 class Promotion extends Model
 {
-    /** @use HasFactory<\Database\Factories\PromotionFactory> */
+    /** @use HasFactory<PromotionFactory> */
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -125,6 +126,13 @@ class Promotion extends Model
     /** True when no daily window is set, or `now` falls inside it. */
     public function withinDailyWindow(Carbon $now): bool
     {
+        // Optional weekdays (["mon","tue",…], e.g. from an AI offer); empty = every day.
+        $days = $this->config['days'] ?? null;
+        $today = strtolower($now->copy()->setTimezone(config('app.business_timezone', 'Asia/Kolkata'))->format('D'));
+        if (is_array($days) && $days !== [] && ! in_array($today, $days, true)) {
+            return false;
+        }
+
         if ($this->daily_start_time === null || $this->daily_end_time === null) {
             return true;
         }

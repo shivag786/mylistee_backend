@@ -113,6 +113,7 @@ class SettingController extends Controller
             'openaiApiKey' => ['sometimes', 'nullable', 'string', 'max:300'],
             'openaiModel' => ['sometimes', 'nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._:-]+$/'],
             'aiMonthlyLimit' => ['sometimes', 'integer', 'min:0', 'max:100000'],
+            'aiMenuScanLimit' => ['sometimes', 'integer', 'min:0', 'max:10000'],
 
             // Theme
             ...array_fill_keys(SettingService::THEME_COLORS, ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/']),

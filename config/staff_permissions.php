@@ -57,7 +57,7 @@ return [
         'menu' => [
             'name' => 'Edit menu',
             'description' => 'Add and change dishes, prices, stock and combos',
-            'routes' => ['business.products.*', 'business.product-categories.*', 'business.combos.*'],
+            'routes' => ['business.products.*', 'business.product-categories.*', 'business.combos.*', 'business.menu-scan.*'],
         ],
         'cash' => [
             'name' => 'Cash drawer & day close',

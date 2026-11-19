@@ -91,6 +91,8 @@ class SettingService
         'openaiApiKey' => '',
         'openaiModel' => 'gpt-4o-mini',
         'aiMonthlyLimit' => 100,
+        // AI menu scans (photo/PDF → dishes) per shop per month; every plan.
+        'aiMenuScanLimit' => 30,
 
         // App theme, applied on every device through GET /config. Defaults are
         // the stock palette in the frontend's tokens.css; hover and soft shades
@@ -159,8 +161,8 @@ class SettingService
 
     /** Landing page section ids. Mirrors the frontend registry (landingContent.ts). */
     public const LANDING_SECTIONS = [
-        'hero', 'banners', 'categories', 'offers', 'nearby', 'customerBenefits', 'howItWorks',
-        'vendorBenefits', 'personalLink', 'pricing', 'faqs', 'finalCta',
+        'hero', 'stats', 'banners', 'vendorTools', 'aiAssistant', 'whyListee', 'cities', 'categories', 'offers',
+        'nearby', 'customerBenefits', 'howItWorks', 'vendorBenefits', 'personalLink', 'pricing', 'faqs', 'finalCta',
     ];
 
     /** Pages that can carry their own SEO title and description. */

@@ -111,6 +111,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         ->middleware('throttle:60,1')
         ->name('reels.view');
     Route::get('config', [ConfigController::class, 'index'])->name('config.index');
+    // Landing page: live shop, city and category counts.
+    Route::get('landing/stats', \App\Http\Controllers\Api\V1\LandingStatsController::class)->name('landing.stats');
     Route::get('banners', [\App\Http\Controllers\Api\V1\BannerController::class, 'index'])->name('banners.index');
 
     // Razorpay server-to-server webhook. Unauthenticated by necessity — the HMAC
@@ -286,6 +288,16 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('ai/generate', [\App\Http\Controllers\Api\V1\Business\AiController::class, 'generate'])
                 ->middleware('throttle:20,1')
                 ->name('ai.generate');
+
+            // AI menu scan: photos / PDF of the menu → dishes to review → products.
+            // Every shop gets it (it is how a new shop fills its menu); own monthly cap.
+            Route::get('menu-scan', [\App\Http\Controllers\Api\V1\Business\MenuScanController::class, 'show'])->name('menu-scan.show');
+            Route::post('menu-scan', [\App\Http\Controllers\Api\V1\Business\MenuScanController::class, 'scan'])
+                ->middleware('throttle:6,1')
+                ->name('menu-scan.scan');
+            Route::post('menu-scan/import', [\App\Http\Controllers\Api\V1\Business\MenuScanController::class, 'import'])
+                ->middleware('throttle:10,1')
+                ->name('menu-scan.import');
 
             // Followers — the customers who followed this shop.
             Route::get('followers', [FollowerController::class, 'index'])->name('followers.index');

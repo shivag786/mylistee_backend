@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Business;
 use App\Models\OrderItem;
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -63,7 +64,7 @@ class AiAssistantService
 
     public function usedThisMonth(Business $business): int
     {
-        return (int) Cache::get($this->usageKey($business), 0);
+        return (int) $this->counter()->get($this->usageKey($business), 0);
     }
 
     /**
@@ -90,9 +91,9 @@ class AiAssistantService
 
         $content = $this->provider() === 'openai'
             ? $this->askOpenAi($system, $task)
-            : $this->askGemini($system, $task);
+            : $this->askGemini($system, [['text' => $task]]);
 
-        $json = json_decode($this->stripFences($content), true);
+        $json = $this->decodeJson($content);
         $items = is_array($json) ? ($json['suggestions'] ?? (array_is_list($json) ? $json : null)) : null;
         // A plain string suggestion ("Thanks for…") becomes {text: "…"}.
         $items = is_array($items) ? array_values(array_filter(array_map(
@@ -104,7 +105,7 @@ class AiAssistantService
             throw new RuntimeException('The AI did not return suggestions. Please try again.');
         }
 
-        Cache::put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
+        $this->counter()->put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
 
         return $items;
     }
@@ -132,9 +133,15 @@ class AiAssistantService
 
     /**
      * Google Gemini generateContent (free tier on AI Studio keys); returns the
-     * JSON text. An overloaded model (429/503) is retried once on the fallback.
+     * JSON text. `$parts` are Gemini content parts: {text} and, for photos and
+     * PDFs, {inline_data: {mime_type, data(base64)}}. An overloaded or retired
+     * model (404/429/5xx) is retried on the fallbacks.
+     *
+     * @param  list<array<string, mixed>>  $parts
+     *
+     * @throws RuntimeException when every model fails
      */
-    private function askGemini(string $system, string $task): string
+    public function askGemini(string $system, array $parts, float $temperature = 0.8, int $timeout = 60): string
     {
         $chosen = (string) ($this->settings->get('geminiModel') ?: self::GEMINI_FALLBACK_MODELS[0]);
         $models = array_values(array_unique([$chosen, ...self::GEMINI_FALLBACK_MODELS]));
@@ -142,12 +149,12 @@ class AiAssistantService
         foreach ($models as $i => $model) {
             try {
                 $response = Http::withHeaders(['x-goog-api-key' => (string) $this->settings->get('geminiApiKey')])
-                    ->timeout(60)
+                    ->timeout($timeout)
                     ->acceptJson()
                     ->post('https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent', [
                         'systemInstruction' => ['parts' => [['text' => $system]]],
-                        'contents' => [['role' => 'user', 'parts' => [['text' => $task]]]],
-                        'generationConfig' => ['responseMimeType' => 'application/json', 'temperature' => 0.8],
+                        'contents' => [['role' => 'user', 'parts' => $parts]],
+                        'generationConfig' => ['responseMimeType' => 'application/json', 'temperature' => $temperature],
                     ]);
             } catch (ConnectionException $e) {
                 Log::warning('Gemini connection failed', ['model' => $model, 'error' => $e->getMessage()]);
@@ -189,15 +196,21 @@ class AiAssistantService
             : 'The AI is busy right now. Please try again in a minute.');
     }
 
-    /** Some models wrap JSON in ```json fences despite JSON mode. */
-    private function stripFences(string $text): string
+    /**
+     * The model's JSON as an array (null when it is not JSON). Some models wrap
+     * it in ```json fences despite JSON mode.
+     *
+     * @return array<mixed>|null
+     */
+    public function decodeJson(string $text): ?array
     {
         $text = trim($text);
         if (str_starts_with($text, '```')) {
             $text = preg_replace('/^```[a-zA-Z]*\s*|\s*```$/', '', $text) ?? $text;
         }
+        $json = json_decode($text, true);
 
-        return $text;
+        return is_array($json) ? $json : null;
     }
 
     /**
@@ -280,6 +293,15 @@ class AiAssistantService
         }
 
         return '';
+    }
+
+    /**
+     * Where the monthly counts live: the limiter store (file in production,
+     * where the default cache is `null` and would forget every count).
+     */
+    private function counter(): Repository
+    {
+        return Cache::store(config('cache.limiter') ?: 'file');
     }
 
     private function usageKey(Business $business): string

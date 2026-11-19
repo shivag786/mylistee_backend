@@ -81,9 +81,13 @@ class SettingService
         'customerSoundAcceptedPath' => null,
         'customerSoundAcceptedUrl' => null,
 
-        // Vendor app AI assistant (OpenAI). Off until a key is saved and it is
-        // switched on; the plan decides which shops get it (module ai_assistant).
+        // Vendor app AI assistant. Off until a key for the chosen provider is
+        // saved and it is switched on; the plan decides which shops get it
+        // (module ai_assistant). Gemini (Google AI Studio) has a free tier.
         'aiEnabled' => false,
+        'aiProvider' => 'gemini', // gemini | openai
+        'geminiApiKey' => '',
+        'geminiModel' => 'gemini-3.1-flash-lite',
         'openaiApiKey' => '',
         'openaiModel' => 'gpt-4o-mini',
         'aiMonthlyLimit' => 100,
@@ -199,7 +203,7 @@ class SettingService
      *
      * @var list<string>
      */
-    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'gmailAppPassword', 'openaiApiKey'];
+    private const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'gmailAppPassword', 'openaiApiKey', 'geminiApiKey'];
 
     /**
      * All settings merged over their defaults.

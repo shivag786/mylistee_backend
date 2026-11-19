@@ -58,9 +58,62 @@ class AiAssistantTest extends TestCase
         ]);
     }
 
+    private function geminiReply(array $suggestions): array
+    {
+        return ['candidates' => [['content' => ['parts' => [['text' => json_encode(['suggestions' => $suggestions])]]]]]];
+    }
+
+    public function test_gemini_is_the_default_provider(): void
+    {
+        app(SettingService::class)->set(['aiEnabled' => true, 'geminiApiKey' => 'AQ.test', 'geminiModel' => 'gemini-3.1-flash-lite']);
+        $this->aiInFreePlan();
+        Http::fake([
+            'generativelanguage.googleapis.com/*' => Http::response($this->geminiReply([['text' => 'Pune runs on our chai.']])),
+        ]);
+        [$owner] = $this->shop();
+
+        $this->as($owner)->getJson('/api/v1/business/ai')->assertOk()->assertJsonPath('data.available', true);
+        $this->as($owner)->postJson('/api/v1/business/ai/generate', ['kind' => 'product_description', 'input' => ['name' => 'Masala chai']])
+            ->assertOk()
+            ->assertJsonPath('data.suggestions.0.text', 'Pune runs on our chai.')
+            ->assertJsonPath('data.used', 1);
+
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'models/gemini-3.1-flash-lite:generateContent')
+            && $r->hasHeader('x-goog-api-key', 'AQ.test')
+            && str_contains(json_encode($r->data()), 'Masala chai'));
+    }
+
+    public function test_gemini_falls_back_when_model_is_overloaded(): void
+    {
+        app(SettingService::class)->set(['aiEnabled' => true, 'geminiApiKey' => 'AQ.test', 'geminiModel' => 'gemini-3.8-flash']);
+        $this->aiInFreePlan();
+        Http::fake([
+            '*/models/gemini-3.8-flash:*' => Http::response(['error' => ['status' => 'UNAVAILABLE']], 503),
+            '*/models/gemini-3.1-flash-lite:*' => Http::response($this->geminiReply([['title' => 'Tip', 'body' => 'Put the QR on the counter.']])),
+        ]);
+        [$owner] = $this->shop();
+
+        $this->as($owner)->postJson('/api/v1/business/ai/generate', ['kind' => 'sales_tips'])
+            ->assertOk()
+            ->assertJsonPath('data.suggestions.0.title', 'Tip');
+    }
+
+    public function test_bad_gemini_key_gives_a_clear_error(): void
+    {
+        app(SettingService::class)->set(['aiEnabled' => true, 'geminiApiKey' => 'bad']);
+        $this->aiInFreePlan();
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => ['message' => 'API key not valid', 'details' => [['reason' => 'API_KEY_INVALID']]]], 400)]);
+        [$owner] = $this->shop();
+
+        $this->as($owner)->postJson('/api/v1/business/ai/generate', ['kind' => 'sales_tips'])
+            ->assertStatus(502)
+            ->assertJsonPath('message', 'The AI key set by Listee is not working. Please tell Listee support.');
+        $this->as($owner)->getJson('/api/v1/business/ai')->assertJsonPath('data.used', 0);
+    }
+
     public function test_owner_gets_suggestions_when_on_and_in_plan(): void
     {
-        app(SettingService::class)->set(['aiEnabled' => true, 'openaiApiKey' => 'sk-test', 'aiMonthlyLimit' => 5]);
+        app(SettingService::class)->set(['aiEnabled' => true, 'aiProvider' => 'openai', 'openaiApiKey' => 'sk-test', 'aiMonthlyLimit' => 5]);
         $this->aiInFreePlan();
         $this->fakeOpenAi();
         [$owner] = $this->shop();
@@ -87,7 +140,7 @@ class AiAssistantTest extends TestCase
         [$owner] = $this->shop();
 
         // On, but the plan has no AI module (unset plans never include it).
-        app(SettingService::class)->set(['aiEnabled' => true, 'openaiApiKey' => 'sk-test']);
+        app(SettingService::class)->set(['aiEnabled' => true, 'aiProvider' => 'openai', 'openaiApiKey' => 'sk-test']);
         $this->as($owner)->getJson('/api/v1/business/ai')->assertOk()->assertJsonPath('data.inPlan', false);
         $this->as($owner)->postJson('/api/v1/business/ai/generate', ['kind' => 'sales_tips'])->assertForbidden();
 
@@ -101,7 +154,7 @@ class AiAssistantTest extends TestCase
 
     public function test_monthly_limit_and_required_input(): void
     {
-        app(SettingService::class)->set(['aiEnabled' => true, 'openaiApiKey' => 'sk-test', 'aiMonthlyLimit' => 1]);
+        app(SettingService::class)->set(['aiEnabled' => true, 'aiProvider' => 'openai', 'openaiApiKey' => 'sk-test', 'aiMonthlyLimit' => 1]);
         $this->aiInFreePlan();
         $this->fakeOpenAi();
         [$owner] = $this->shop();

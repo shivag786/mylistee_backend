@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Business;
 use App\Models\OrderItem;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -13,12 +15,12 @@ use RuntimeException;
 /**
  * The shop owner's AI helper (vendor app → AI assistant): writes dish
  * descriptions, offer and combo ideas, notification copy, sales tips and
- * review replies, through OpenAI's Chat Completions API.
+ * review replies, through Google Gemini (free tier) or OpenAI.
  *
  * Everything comes back as a short list of suggestions the owner taps to use;
  * nothing is saved or sent by itself.
  *
- * Admin → Settings → AI assistant holds the switch, the OpenAI key, the model
+ * Admin → Settings → AI assistant holds the switch, the provider, its key, the model
  * and the monthly limit per shop; the plan decides which shops get it
  * (module `ai_assistant`).
  */
@@ -36,9 +38,22 @@ class AiAssistantService
 
     public function __construct(private readonly SettingService $settings) {}
 
+    /**
+     * Gemini models tried, in order, after the chosen one when it is
+     * overloaded or gone (free tier; the lite models answer in seconds).
+     */
+    public const GEMINI_FALLBACK_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+
+    public function provider(): string
+    {
+        return $this->settings->get('aiProvider') === 'openai' ? 'openai' : 'gemini';
+    }
+
     public function enabled(): bool
     {
-        return (bool) $this->settings->get('aiEnabled', false) && filled($this->settings->get('openaiApiKey'));
+        $key = $this->provider() === 'openai' ? 'openaiApiKey' : 'geminiApiKey';
+
+        return (bool) $this->settings->get('aiEnabled', false) && filled($this->settings->get($key));
     }
 
     public function monthlyLimit(): int
@@ -73,6 +88,30 @@ class AiAssistantService
             .'shop owner can use as-is. Use ₹ for prices. No hashtags, no made-up facts about the shop. '
             .'Reply with JSON only, exactly in this shape: '.$shape;
 
+        $content = $this->provider() === 'openai'
+            ? $this->askOpenAi($system, $task)
+            : $this->askGemini($system, $task);
+
+        $json = json_decode($this->stripFences($content), true);
+        $items = is_array($json) ? ($json['suggestions'] ?? (array_is_list($json) ? $json : null)) : null;
+        // A plain string suggestion ("Thanks for…") becomes {text: "…"}.
+        $items = is_array($items) ? array_values(array_filter(array_map(
+            fn ($s) => is_string($s) && trim($s) !== '' ? ['text' => trim($s)] : $s,
+            $items,
+        ), 'is_array')) : [];
+        if ($items === []) {
+            Log::warning('AI returned no usable suggestions', ['kind' => $kind, 'content' => mb_substr($content, 0, 500)]);
+            throw new RuntimeException('The AI did not return suggestions. Please try again.');
+        }
+
+        Cache::put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
+
+        return $items;
+    }
+
+    /** OpenAI Chat Completions; returns the JSON text the model wrote. */
+    private function askOpenAi(string $system, string $task): string
+    {
         $response = Http::withToken((string) $this->settings->get('openaiApiKey'))
             ->timeout(45)
             ->acceptJson()
@@ -86,22 +125,79 @@ class AiAssistantService
                 'temperature' => 0.8,
             ]);
 
-        if ($response->failed()) {
-            Log::warning('OpenAI request failed', ['status' => $response->status(), 'body' => mb_substr($response->body(), 0, 500)]);
-            throw new RuntimeException($response->status() === 401
-                ? 'The AI key set by Listee is not working. Please tell Listee support.'
-                : 'The AI is busy right now. Please try again in a minute.');
+        $this->failIfBad($response, 'OpenAI', [401]);
+
+        return (string) $response->json('choices.0.message.content');
+    }
+
+    /**
+     * Google Gemini generateContent (free tier on AI Studio keys); returns the
+     * JSON text. An overloaded model (429/503) is retried once on the fallback.
+     */
+    private function askGemini(string $system, string $task): string
+    {
+        $chosen = (string) ($this->settings->get('geminiModel') ?: self::GEMINI_FALLBACK_MODELS[0]);
+        $models = array_values(array_unique([$chosen, ...self::GEMINI_FALLBACK_MODELS]));
+
+        foreach ($models as $i => $model) {
+            try {
+                $response = Http::withHeaders(['x-goog-api-key' => (string) $this->settings->get('geminiApiKey')])
+                    ->timeout(60)
+                    ->acceptJson()
+                    ->post('https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent', [
+                        'systemInstruction' => ['parts' => [['text' => $system]]],
+                        'contents' => [['role' => 'user', 'parts' => [['text' => $task]]]],
+                        'generationConfig' => ['responseMimeType' => 'application/json', 'temperature' => 0.8],
+                    ]);
+            } catch (ConnectionException $e) {
+                Log::warning('Gemini connection failed', ['model' => $model, 'error' => $e->getMessage()]);
+                if ($i < count($models) - 1) {
+                    continue;
+                }
+                throw new RuntimeException('The AI is busy right now. Please try again in a minute.');
+            }
+
+            if (in_array($response->status(), [404, 429, 500, 503], true) && $i < count($models) - 1) {
+                Log::info('Gemini model unavailable, using fallback', ['model' => $model, 'status' => $response->status()]);
+
+                continue;
+            }
+
+            $this->failIfBad($response, 'Gemini', [400, 401, 403]);
+
+            // Skip "thought" parts some models return; join the answer parts.
+            return collect($response->json('candidates.0.content.parts', []))
+                ->reject(fn ($p) => ! empty($p['thought']))
+                ->pluck('text')
+                ->implode('');
         }
 
-        $json = json_decode((string) $response->json('choices.0.message.content'), true);
-        $items = is_array($json) ? ($json['suggestions'] ?? null) : null;
-        if (! is_array($items) || $items === []) {
-            throw new RuntimeException('The AI did not return suggestions. Please try again.');
+        throw new RuntimeException('The AI is busy right now. Please try again in a minute.');
+    }
+
+    /** @param  list<int>  $keyErrors statuses that mean the key itself is wrong */
+    private function failIfBad(Response $response, string $name, array $keyErrors): void
+    {
+        if ($response->successful()) {
+            return;
+        }
+        Log::warning($name.' request failed', ['status' => $response->status(), 'body' => mb_substr($response->body(), 0, 500)]);
+        $badKey = in_array($response->status(), $keyErrors, true)
+            && ($response->status() !== 400 || str_contains($response->body(), 'API_KEY'));
+        throw new RuntimeException($badKey
+            ? 'The AI key set by Listee is not working. Please tell Listee support.'
+            : 'The AI is busy right now. Please try again in a minute.');
+    }
+
+    /** Some models wrap JSON in ```json fences despite JSON mode. */
+    private function stripFences(string $text): string
+    {
+        $text = trim($text);
+        if (str_starts_with($text, '```')) {
+            $text = preg_replace('/^```[a-zA-Z]*\s*|\s*```$/', '', $text) ?? $text;
         }
 
-        Cache::put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
-
-        return array_values(array_filter($items, 'is_array'));
+        return $text;
     }
 
     /**

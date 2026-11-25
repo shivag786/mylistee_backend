@@ -172,8 +172,124 @@ class AdminTest extends TestCase
         // response (no queue worker needed on the server).
         $this->assertDatabaseCount('notifications', 0);
         Queue::assertPushed(SendBroadcastNotification::class, function ($job) {
-            return $job->target === 'all' && $job->title === 'Platform update';
+            $b = \App\Models\AdminBroadcast::find($job->broadcastId);
+
+            return $b->target === 'all' && $b->title === 'Platform update' && $b->recipients === 6;
         });
+    }
+
+    public function test_broadcast_reaches_one_shops_customers_and_records_history(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::BusinessOwner]);
+        $shop = \App\Models\Business::factory()->create(['owner_id' => $owner->id]);
+        $fan = User::factory()->create(['role' => UserRole::Customer]);
+        User::factory()->create(['role' => UserRole::Customer]); // not connected
+        \Illuminate\Support\Facades\DB::table('favorite_businesses')->insert([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(), 'customer_id' => $fan->id, 'business_id' => $shop->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $admin = $this->admin();
+
+        $this->withToken($this->token($admin))
+            ->getJson('/api/v1/admin/broadcast/preview?target=shop_customers&businessId='.$shop->uuid.'&audience=followers')
+            ->assertOk()
+            ->assertJsonPath('data.recipients', 1)
+            ->assertJsonPath('data.reachable', 0);
+
+        $this->withToken($this->token($admin))
+            ->postJson('/api/v1/admin/broadcast', [
+                'title' => 'Weekend offer', 'target' => 'shop_customers',
+                'businessId' => $shop->uuid, 'audience' => 'followers', 'link' => '/b/'.$shop->slug,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.sent', 1);
+
+        $this->assertDatabaseHas('notifications', ['user_id' => $fan->id, 'title' => 'Weekend offer']);
+        $this->assertDatabaseCount('notifications', 1);
+
+        $this->withToken($this->token($admin))
+            ->getJson('/api/v1/admin/broadcast')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.status', 'sent')
+            ->assertJsonPath('data.items.0.recipients', 1);
+    }
+
+    public function test_broadcast_test_goes_only_to_the_admin(): void
+    {
+        User::factory()->count(2)->create(['role' => UserRole::Customer]);
+        $admin = $this->admin();
+
+        $this->withToken($this->token($admin))
+            ->postJson('/api/v1/admin/broadcast', ['title' => 'Test', 'target' => 'test'])
+            ->assertOk()
+            ->assertJsonPath('data.sent', 1);
+
+        $this->assertDatabaseHas('notifications', ['user_id' => $admin->id, 'title' => 'Test']);
+        $this->assertDatabaseCount('notifications', 1);
+    }
+
+    public function test_insight_pages_respond(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::BusinessOwner]);
+        \App\Models\Business::factory()->create(['owner_id' => $owner->id, 'status' => 'active']);
+        $token = $this->token($this->admin());
+
+        foreach (['active', 'expiring', 'expired', 'cancelled', 'all'] as $status) {
+            $this->withToken($token)->getJson('/api/v1/admin/subscriptions?status='.$status)->assertOk()->assertJsonStructure(['data' => ['summary', 'items', 'meta']]);
+        }
+        $this->withToken($token)->getJson('/api/v1/admin/vendor-health')
+            ->assertOk()
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.items.0.issues.0.key', 'no_logo');
+        $this->withToken($token)->getJson('/api/v1/admin/vendor-health?issue=no_products')->assertOk()->assertJsonPath('data.meta.total', 1);
+        $this->withToken($token)->getJson('/api/v1/admin/qr-scans?days=7')->assertOk()->assertJsonCount(7, 'data.series');
+    }
+
+    public function test_website_enquiry_reaches_admins(): void
+    {
+        $admin = $this->admin();
+
+        $this->postJson('/api/v1/enquiries', [
+            'name' => 'Ravi', 'phone' => '98765 43210', 'city' => 'Jhansi',
+            'businessName' => 'Ravi Sweets', 'topic' => 'shop', 'source' => '/pos-software/jhansi',
+        ])->assertCreated();
+        $this->postJson('/api/v1/enquiries', ['name' => 'Bot', 'phone' => '1234567890', 'website' => 'spam.com'])->assertOk();
+        $this->postJson('/api/v1/enquiries', ['name' => 'X', 'phone' => 'abc'])->assertStatus(422);
+
+        $this->assertDatabaseCount('enquiries', 1);
+        $this->assertDatabaseHas('notifications', ['user_id' => $admin->id, 'title' => 'New enquiry from Jhansi: Ravi']);
+
+        $id = $this->withToken($this->token($admin))->getJson('/api/v1/admin/enquiries')
+            ->assertOk()->assertJsonPath('data.counts.new', 1)->json('data.items.0.id');
+        $this->withToken($this->token($admin))->patchJson('/api/v1/admin/enquiries/'.$id, ['status' => 'contacted', 'notes' => 'Demo on Monday'])
+            ->assertOk()->assertJsonPath('data.status', 'contacted');
+    }
+
+    public function test_app_version_gates_are_saved_and_public(): void
+    {
+        $this->withToken($this->token($this->admin()))
+            ->putJson('/api/v1/admin/settings', ['vendorAppMinVersion' => '1.2.1', 'customerAppLatestVersion' => '1.1.1'])
+            ->assertOk();
+        $this->withToken($this->token($this->admin()))
+            ->putJson('/api/v1/admin/settings', ['vendorAppMinVersion' => 'abc'])
+            ->assertStatus(422);
+
+        $this->getJson('/api/v1/config')
+            ->assertJsonPath('data.apps.vendor.minVersion', '1.2.1')
+            ->assertJsonPath('data.apps.customer.latestVersion', '1.1.1');
+    }
+
+    public function test_admin_can_save_play_store_links_and_config_shows_them(): void
+    {
+        $url = 'https://play.google.com/store/apps/details?id=org.listee.app';
+        $this->withToken($this->token($this->admin()))
+            ->putJson('/api/v1/admin/settings', ['playStoreCustomerUrl' => $url, 'playStoreVendorUrl' => ''])
+            ->assertOk()
+            ->assertJsonPath('data.playStoreCustomerUrl', $url);
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.apps.customerPlayStore', $url)
+            ->assertJsonPath('data.apps.vendorPlayStore', '');
     }
 
     public function test_admin_can_toggle_a_feature_flag(): void

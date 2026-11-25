@@ -21,6 +21,8 @@ class AdminBusinessResource extends JsonResource
             'id' => $this->uuid,
             'name' => $this->name,
             'slug' => $this->slug,
+            // What the shop's permanent QR opens (same as the owner's QR page).
+            'qrUrl' => app(\App\Services\QrService::class)->profileUrl((string) $this->slug),
             'ownerName' => $this->owner?->name,
             'ownerEmail' => $this->owner?->email,
             // Login credentials for the owner (demo — pin_plain is plaintext).

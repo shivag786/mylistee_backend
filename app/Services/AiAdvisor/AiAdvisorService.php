@@ -61,7 +61,7 @@ class AiAdvisorService
         if ($this->refreshesLeft($business, $kind) <= 0) {
             throw ValidationException::withMessages(['refresh' => ['You have refreshed these ideas enough for today. New ideas come every night on their own.']]);
         }
-        $out = $this->generate($business, $kind);
+        $out = $this->generate($business, $kind, 'refresh');
         $this->counter()->put($this->refreshKey($business, $kind), (int) $this->counter()->get($this->refreshKey($business, $kind), 0) + 1, now()->endOfDay());
 
         return $out;
@@ -75,7 +75,7 @@ class AiAdvisorService
      * @throws ValidationException when there is too little data
      * @throws RuntimeException when the AI fails or returns nothing usable
      */
-    public function generate(Business $business, string $kind): array
+    public function generate(Business $business, string $kind, string $source = 'system'): array
     {
         $stats = $kind === AiSuggestion::KIND_SALES ? $this->stats->sales($business) : $this->stats->growth($business);
         if ($stats['orders'] < self::MIN_ORDERS) {
@@ -102,7 +102,7 @@ class AiAdvisorService
             if ($safe !== null) {
                 $clean[] = $safe;
             }
-            if (count($clean) >= (int) config('ai_advisor.max_suggestions', 4)) {
+            if (count($clean) >= $this->ai->ideasPerAnswer()) {
                 break;
             }
         }
@@ -111,6 +111,7 @@ class AiAdvisorService
             throw new RuntimeException('The AI could not come up with safe ideas this time. Please try again later.');
         }
 
+        $this->ai->record($business, 'advisor_'.$kind, $source);
         unset($stats['catalog']);
         $batch = (string) Str::uuid();
 
@@ -364,7 +365,7 @@ class AiAdvisorService
         $prompt = "Shop: {$business->name}".($business->category ? " ({$business->category->name})" : '').($business->city ? ", {$business->city}" : '').".\n"
             ."Last {$stats['windowDays']} days of completed orders (aggregated):\n".json_encode($data, JSON_UNESCAPED_UNICODE)."\n\n"
             ."Menu (id | name | price | section):\n{$catalog}\n\n"
-            .'Give 3 or 4 different suggestions to raise sales. Ideas: pair items that sell together into a combo, push slow items '
+            .'Give exactly '.$this->ai->ideasPerAnswer().' different suggestions to raise sales. Ideas: pair items that sell together into a combo, push slow items '
             .'with a weak hour or weekday, a happy hour in the slowest hours, a bill-level offer to raise the average order value. '
             ."Do not repeat an offer that is already active. A bill-level offer (product_ids []) works every day at all hours — for a day- or hour-specific deal, pick items.\n"
             ."Rules: no discount above {$max}%; a combo costs at least {$ratio}% of its items’ total; use only menu ids above; "
@@ -393,7 +394,7 @@ class AiAdvisorService
         $prompt = "Shop: {$business->name}".($business->category ? " ({$business->category->name})" : '').($business->city ? ", {$business->city}" : '').".\n"
             ."Customer numbers for the last {$stats['windowDays']} days (aggregated, no personal data):\n".json_encode($stats, JSON_UNESCAPED_UNICODE)."\n"
             ."Hours are 0–23 local time. Some menu items: {$items}\n\n"
-            .'Give 3 or 4 suggestions, each a different type from: win_back (bring lapsed customers back), first_order (turn followers '
+            .'Give exactly '.$this->ai->ideasPerAnswer().' suggestions, each a different type from: win_back (bring lapsed customers back), first_order (turn followers '
             .'into first-time buyers), loyalty (reward regulars), review_request (ask happy customers for a review), slow_hour_push '
             .'(fill the slowest hours), item_highlight (feature a strong item). Pick what the numbers need most.'."\n"
             .'Each: "type", "title" (short, English, for the owner), "segment" (one of: lapsed, followers, customers, everyone), '

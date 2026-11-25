@@ -33,8 +33,7 @@ class AiController extends Controller
         return ApiResponse::success([
             'available' => $this->ai->enabled(),
             'inPlan' => $this->access->allows($business, 'ai_assistant'),
-            'used' => $this->ai->usedThisMonth($business),
-            'limit' => $this->ai->monthlyLimit(),
+            ...$this->ai->usage($business),
             'kinds' => AiAssistantService::KINDS,
         ], 'AI assistant.');
     }
@@ -65,8 +64,7 @@ class AiController extends Controller
 
         return ApiResponse::success([
             'suggestions' => $suggestions,
-            'used' => $this->ai->usedThisMonth($business),
-            'limit' => $this->ai->monthlyLimit(),
+            ...$this->ai->usage($business),
         ], 'Here are some ideas.');
     }
 }

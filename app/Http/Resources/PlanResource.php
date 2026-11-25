@@ -53,6 +53,8 @@ class PlanResource extends JsonResource
                 'pushPerCustomerPerMonth' => $this->push_per_customer_per_month,
                 // WhatsApp offer messages a month (null = unlimited, 0 = none).
                 'whatsappPerMonth' => $this->whatsapp_per_month,
+                // AI answers a month (null = unlimited, 0 = none).
+                'aiAnswersPerMonth' => $this->ai_answers_per_month,
                 'maxOfferDays' => $this->max_offer_days,
                 'maxQrCodes' => $this->max_qr_codes,
                 'maxGalleryImages' => $this->max_gallery_images,

@@ -19,6 +19,7 @@ class PlanSeeder extends Seeder
     private const PLANS = [
         [
             'key' => 'free',
+            'ai_answers_per_month' => 20,
             'name' => 'Free',
             'description' => 'Everything you need to get started.',
             'price' => 0,
@@ -37,6 +38,7 @@ class PlanSeeder extends Seeder
         ],
         [
             'key' => 'starter',
+            'ai_answers_per_month' => 100,
             'name' => 'Starter',
             'description' => 'For growing local shops.',
             'price' => 499,
@@ -55,6 +57,7 @@ class PlanSeeder extends Seeder
         ],
         [
             'key' => 'pro',
+            'ai_answers_per_month' => 300,
             'name' => 'Pro',
             'description' => 'Unlock the full growth toolkit.',
             'price' => 1499,
@@ -73,6 +76,7 @@ class PlanSeeder extends Seeder
         ],
         [
             'key' => 'enterprise',
+            'ai_answers_per_month' => 1000,
             'name' => 'Enterprise',
             'description' => 'For chains, franchises and multi-branch brands.',
             'price' => 4999,

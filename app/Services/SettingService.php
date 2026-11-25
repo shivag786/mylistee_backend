@@ -17,6 +17,17 @@ class SettingService
         'brandName' => 'Listee',
         'supportEmail' => 'info@listee.org',
         'supportPhone' => '',
+        // Store pages of the two phone apps (customer: Listee, vendor: Listee
+        // Business). Shown on shop posters, the website and in the apps.
+        'playStoreCustomerUrl' => '',
+        'playStoreVendorUrl' => '',
+        // App updates: below the minimum version the app must update (blocking
+        // screen); below the latest it may show a "new version" nudge. '' = off.
+        'customerAppMinVersion' => '',
+        'customerAppLatestVersion' => '',
+        'vendorAppMinVersion' => '',
+        'vendorAppLatestVersion' => '',
+        'appUpdateMessage' => 'A new version of the app is available with fixes and new features. Please update to continue.',
         'currency' => 'INR',
         'timezone' => 'Asia/Kolkata',
         'defaultLanguage' => 'en',
@@ -91,6 +102,8 @@ class SettingService
         'openaiApiKey' => '',
         'openaiModel' => 'gpt-4o-mini',
         'aiMonthlyLimit' => 100,
+        // Ideas in one AI answer (offer ideas, combos, messages…).
+        'aiIdeasPerAnswer' => 3,
         // AI menu scans (photo/PDF → dishes) per shop per month; every plan.
         'aiMenuScanLimit' => 30,
 
@@ -296,7 +309,7 @@ class SettingService
      * Persist a set of settings (only known keys).
      *
      * @param  array<string, mixed>  $values
-     * @return array<string, mixed>  the full settings map after the update
+     * @return array<string, mixed> the full settings map after the update
      */
     public function set(array $values): array
     {

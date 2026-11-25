@@ -87,6 +87,47 @@ class MenuScanTest extends TestCase
             && str_contains(json_encode($r->data()), 'Sharma Dhaba'));
     }
 
+    public function test_thali_keeps_its_full_contents_as_one_tidy_description(): void
+    {
+        $this->aiOn();
+        [$owner] = $this->shop();
+        $long = "4 Butter Roti\n- Dal Makhani\n• Paneer Butter Masala\nMix Veg, Jeera Rice\n\nRaita, Salad, Papad, Gulab Jamun. "
+            .str_repeat('Unlimited refill of dal and roti on request. ', 6);
+        $this->fakeGemini([
+            ['name' => 'Special Thali', 'category' => 'Thali', 'price' => 249, 'description' => $long],
+            ['name' => 'Mini Thali', 'category' => 'Thali', 'price' => 149, 'description' => ['3 Roti', 'Dal', 'Sabzi', 'Rice']],
+        ]);
+
+        $res = $this->as($owner)->post('/api/v1/business/menu-scan', ['files' => [$this->photo()]], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.items.1.description', '3 Roti, Dal, Sabzi, Rice');
+
+        $desc = $res->json('data.items.0.description');
+        $this->assertStringStartsWith('4 Butter Roti, Dal Makhani, Paneer Butter Masala, Mix Veg, Jeera Rice, Raita, Salad, Papad, Gulab Jamun.', $desc);
+        $this->assertGreaterThan(300, mb_strlen($desc)); // no longer cut at 300
+        $this->assertStringNotContainsString("\n", $desc);
+        Http::assertSent(fn ($r) => str_contains(json_encode($r->data()), 'THALIS')
+            && ($r->data()['generationConfig']['maxOutputTokens'] ?? null) === 32768);
+    }
+
+    public function test_an_answer_cut_off_mid_list_keeps_the_complete_items(): void
+    {
+        $this->aiOn();
+        [$owner] = $this->shop();
+        $cut = '{"items":[{"name":"Tea","price":10},{"name":"Coffee","price":20},{"name":"Thali","price":200,"description":"4 Roti, Da';
+        Http::fake([
+            'generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [['content' => ['parts' => [['text' => $cut]]]]],
+            ]),
+        ]);
+
+        $this->as($owner)->post('/api/v1/business/menu-scan', ['files' => [$this->photo()]], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonCount(2, 'data.items')
+            ->assertJsonPath('data.items.1.name', 'Coffee');
+    }
+
     public function test_import_creates_products_sections_and_sizes_and_skips_existing(): void
     {
         [$owner, $business] = $this->shop();

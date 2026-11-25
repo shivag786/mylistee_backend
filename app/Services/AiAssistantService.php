@@ -2,12 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\AiUsage;
 use App\Models\Business;
 use App\Models\OrderItem;
-use Illuminate\Contracts\Cache\Repository;
+use App\Services\AiAdvisor\AdvisorStatsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -35,6 +36,7 @@ class AiAssistantService
         'combo_ideas' => 'Combo ideas',
         'sales_tips' => 'Sales tips',
         'review_reply' => 'Review reply',
+        'ask' => 'Ask your sales manager',
     ];
 
     public function __construct(private readonly SettingService $settings) {}
@@ -57,14 +59,94 @@ class AiAssistantService
         return (bool) $this->settings->get('aiEnabled', false) && filled($this->settings->get($key));
     }
 
-    public function monthlyLimit(): int
+    /** Shown as the limit when a plan has unlimited AI answers. */
+    public const UNLIMITED = 100000;
+
+    /**
+     * AI answers a month for this shop's plan; null = unlimited. A shop with
+     * no plan at all falls back to the admin's old single limit.
+     */
+    public function planLimit(Business $business): ?int
     {
-        return max(0, (int) $this->settings->get('aiMonthlyLimit', 100));
+        $plan = $business->currentPlan();
+        if ($plan === null) {
+            return max(0, (int) $this->settings->get('aiMonthlyLimit', 100));
+        }
+
+        return $plan->ai_answers_per_month === null ? null : max(0, (int) $plan->ai_answers_per_month);
     }
 
+    /** Ideas in one answer (admin setting, 1–10). */
+    public function ideasPerAnswer(): int
+    {
+        return min(10, max(1, (int) $this->settings->get('aiIdeasPerAnswer', 3)));
+    }
+
+    /**
+     * Where the shop stands this month. `used`/`limit` include add-on answers
+     * (limit = plan answers + add-on answers used + add-on answers left), so
+     * `limit - used` is everything still available — older app builds that
+     * only read these two keep working.
+     *
+     * @return array{planLimit: ?int, planUsed: int, addonUsed: int, credits: int, left: ?int, used: int, limit: int, unlimited: bool}
+     */
+    public function usage(Business $business): array
+    {
+        $rows = AiUsage::query()->where('business_id', $business->id)
+            ->where('created_at', '>=', now()->startOfMonth())
+            ->whereIn('source', ['plan', 'addon'])
+            ->selectRaw('source, COUNT(*) as n')->groupBy('source')->pluck('n', 'source');
+        $planUsed = (int) ($rows['plan'] ?? 0);
+        $addonUsed = (int) ($rows['addon'] ?? 0);
+        $credits = (int) Business::query()->whereKey($business->id)->value('ai_credits');
+        $planLimit = $this->planLimit($business);
+        $left = $planLimit === null ? null : max(0, $planLimit - $planUsed) + $credits;
+
+        return [
+            'planLimit' => $planLimit,
+            'planUsed' => $planUsed,
+            'addonUsed' => $addonUsed,
+            'credits' => $credits,
+            'left' => $left,
+            'used' => $planUsed + $addonUsed,
+            'limit' => $planLimit === null ? self::UNLIMITED : $planLimit + $addonUsed + $credits,
+            'unlimited' => $planLimit === null,
+        ];
+    }
+
+    /** All AI answers used this month (plan + add-on). */
     public function usedThisMonth(Business $business): int
     {
-        return (int) $this->counter()->get($this->usageKey($business), 0);
+        return $this->usage($business)['used'];
+    }
+
+    /** @deprecated kept for older callers: the shop's total available this month. */
+    public function monthlyLimit(?Business $business = null): int
+    {
+        return $business === null ? max(0, (int) $this->settings->get('aiMonthlyLimit', 100)) : $this->usage($business)['limit'];
+    }
+
+    /** Log one AI call (any source) for the admin's usage report. */
+    public function record(?Business $business, string $kind, string $source): void
+    {
+        AiUsage::query()->create(['business_id' => $business?->id, 'kind' => mb_substr($kind, 0, 40), 'source' => $source]);
+    }
+
+    /**
+     * Count one owner AI answer: from the month's plan answers first, then
+     * from the add-on answers.
+     */
+    private function charge(Business $business, string $kind): void
+    {
+        DB::transaction(function () use ($business, $kind): void {
+            $u = $this->usage($business);
+            $source = 'plan';
+            if ($u['planLimit'] !== null && $u['planUsed'] >= $u['planLimit']) {
+                $took = Business::query()->whereKey($business->id)->where('ai_credits', '>', 0)->decrement('ai_credits');
+                $source = $took > 0 ? 'addon' : 'plan';
+            }
+            $this->record($business, $kind, $source);
+        });
     }
 
     /**
@@ -76,9 +158,10 @@ class AiAssistantService
      */
     public function generate(Business $business, string $kind, array $input): array
     {
-        if ($this->usedThisMonth($business) >= $this->monthlyLimit()) {
+        $left = $this->usage($business)['left'];
+        if ($left !== null && $left <= 0) {
             throw ValidationException::withMessages([
-                'limit' => ['You have used all your AI suggestions for this month. They refresh on the 1st.'],
+                'limit' => ['You have used all your AI answers for this month. Buy an AI pack to keep going, or wait — they refresh on the 1st.'],
             ]);
         }
 
@@ -105,9 +188,10 @@ class AiAssistantService
             throw new RuntimeException('The AI did not return suggestions. Please try again.');
         }
 
-        $this->counter()->put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
+        $this->charge($business, $kind);
 
-        return $items;
+        // Never more ideas than the admin allows in one answer.
+        return array_slice($items, 0, $kind === 'ask' ? 1 : $this->ideasPerAnswer());
     }
 
     /** OpenAI Chat Completions; returns the JSON text the model wrote. */
@@ -141,7 +225,7 @@ class AiAssistantService
      *
      * @throws RuntimeException when every model fails
      */
-    public function askGemini(string $system, array $parts, float $temperature = 0.8, int $timeout = 60): string
+    public function askGemini(string $system, array $parts, float $temperature = 0.8, int $timeout = 60, ?int $maxOutputTokens = null): string
     {
         $chosen = (string) ($this->settings->get('geminiModel') ?: self::GEMINI_FALLBACK_MODELS[0]);
         $models = array_values(array_unique([$chosen, ...self::GEMINI_FALLBACK_MODELS]));
@@ -154,7 +238,11 @@ class AiAssistantService
                     ->post('https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent', [
                         'systemInstruction' => ['parts' => [['text' => $system]]],
                         'contents' => [['role' => 'user', 'parts' => $parts]],
-                        'generationConfig' => ['responseMimeType' => 'application/json', 'temperature' => $temperature],
+                        'generationConfig' => array_filter([
+                            'responseMimeType' => 'application/json',
+                            'temperature' => $temperature,
+                            'maxOutputTokens' => $maxOutputTokens,
+                        ], fn ($v) => $v !== null),
                     ]);
             } catch (ConnectionException $e) {
                 Log::warning('Gemini connection failed', ['model' => $model, 'error' => $e->getMessage()]);
@@ -222,42 +310,53 @@ class AiAssistantService
     private function task(Business $business, string $kind, array $input): array
     {
         $shop = $this->shopContext($business);
+        $n = $this->ideasPerAnswer();
         $note = trim((string) ($input['note'] ?? ''));
         $extra = $note !== '' ? "\nThe owner adds: {$note}" : '';
 
         return match ($kind) {
             'product_description' => [
                 $this->need($input, 'name', 'Enter the dish name first.')
-                    ."\nWrite 3 different menu descriptions (max 25 words each) for this item at {$shop}"
+                    ."\nWrite {$n} different menu descriptions (max 25 words each) for this item at {$shop}"
                     .' Item: '.$input['name'].(filled($input['price'] ?? null) ? ' (₹'.$input['price'].')' : '').'.'.$extra,
                 '{"suggestions":[{"text":"..."}]}',
             ],
             'offer_ideas' => [
-                "Suggest 4 offers that would bring more customers to {$shop} Mix spin-wheel prizes, happy hours and bill discounts. "
+                "Suggest {$n} offers that would bring more customers to {$shop} Mix spin-wheel prizes, happy hours and bill discounts. "
                 .'Each needs a short title, one-line description, a type (percentage, flat, free_item, bogo, happy_hour or cashback) '
                 .'and a reward value like "20%", "₹50 off" or "Free chai".'.$extra,
                 '{"suggestions":[{"title":"...","description":"...","type":"percentage","rewardValue":"20%"}]}',
             ],
             'push_message' => [
-                "Write 4 push notifications {$shop} could send to its followers. Title max 40 characters, body max 110 characters, "
+                "Write {$n} push notifications {$shop} could send to its followers. Title max 40 characters, body max 110 characters, "
                 .'friendly with one emoji at most.'.(filled($input['goal'] ?? null) ? ' Goal: '.$input['goal'].'.' : '').$extra,
                 '{"suggestions":[{"title":"...","body":"..."}]}',
             ],
             'combo_ideas' => [
-                "Suggest 3 combo deals for {$shop} using only items from its menu. Give each a catchy name, the items, "
+                "Suggest {$n} combo deals for {$shop} using only items from its menu. Give each a catchy name, the items, "
                 .'and a combo price about 10–15% below the items added up.'.$extra,
                 '{"suggestions":[{"name":"...","items":["..."],"price":199,"why":"..."}]}',
             ],
             'sales_tips' => [
-                "Give 5 practical, low-cost tips to grow sales this week at {$shop} Each with a short title and 1–2 sentences."
+                "Give {$n} practical, low-cost tips to grow sales this week at {$shop} Each with a short title and 1–2 sentences."
                 .' Mention Listee tools where they fit (spin & win, combos, happy hours, push notifications, QR at the counter).'.$extra,
                 '{"suggestions":[{"title":"...","body":"..."}]}',
             ],
             'review_reply' => [
                 $this->need($input, 'review', 'Paste the review first.')
-                    ."\nWrite 3 short, polite replies (max 45 words) from the owner of {$shop} to this "
+                    ."\nWrite {$n} short, polite replies (max 45 words) from the owner of {$shop} to this "
                     .(filled($input['rating'] ?? null) ? $input['rating'].'-star ' : '').'review: "'.mb_substr((string) $input['review'], 0, 600).'"',
                 '{"suggestions":[{"text":"..."}]}',
+            ],
+            'ask' => [
+                $this->need($input, 'question', 'Type your question first.')
+                    ."\nYou are now the shop's sales manager. The owner of {$shop} asks: \"".mb_substr(trim((string) $input['question']), 0, 500).'"'
+                    ."\nTheir numbers (last 30 days, paid and completed orders only): ".$this->numbers($business)
+                    ."\nAnswer in the same language and style the owner used (Hindi, Hinglish or English). Be direct and practical: "
+                    .'first the answer in 2–4 short sentences built on the numbers above (say plainly when there is not enough data yet), '
+                    .'then up to 3 next steps they can do today in Listee (combos, offers, happy hours, spin & win, push notifications, '
+                    .'menu photos and descriptions, table QR). Never invent numbers, customers or reviews. Max 140 words in total.',
+                '{"suggestions":[{"text":"the answer","steps":["...","..."]}]}',
             ],
             default => throw ValidationException::withMessages(['kind' => ['Unknown request.']]),
         };
@@ -285,6 +384,40 @@ class AiAssistantService
             .($menu !== [] ? ' Menu includes: '.implode(', ', $menu).'.' : ''));
     }
 
+    /** The shop's own sales numbers, compact, for the "ask" kind. */
+    private function numbers(Business $business): string
+    {
+        try {
+            $stats = app(AdvisorStatsService::class);
+            $sales = $stats->sales($business);
+            $growth = $stats->growth($business);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return 'not available.';
+        }
+        $items = fn ($list) => collect($list)->take(8)->map(fn ($i) => $i['name'].' ×'.$i['qty'])->implode(', ');
+
+        return json_encode([
+            'orders' => $sales['orders'] ?? 0,
+            'salesRupees' => $sales['revenue'] ?? 0,
+            'averageBill' => $sales['aov'] ?? 0,
+            'bestSellers' => $items($sales['topItems'] ?? []),
+            'slowSellers' => $items($sales['bottomItems'] ?? []),
+            'ordersByWeekday' => collect($sales['byWeekday'] ?? [])->mapWithKeys(fn ($d) => [$d['day'] => $d['orders']])->all(),
+            'busyHours' => $growth['peakHours'] ?? [],
+            'slowHours' => $growth['slowHours'] ?? [],
+            'oftenOrderedTogether' => collect($sales['topPairs'] ?? [])->take(5)->map(fn ($p) => $p['a'].' + '.$p['b'])->all(),
+            'customers' => $growth['uniqueCustomers'] ?? 0,
+            'repeatRatePercent' => $growth['repeatRatePercent'] ?? 0,
+            'lapsedCustomers' => $growth['lapsedCustomers'] ?? 0,
+            'followers' => $growth['followers'] ?? 0,
+            'rating' => $growth['rating'] ?? null,
+            'menuItems' => count($sales['catalog'] ?? []),
+            'liveOffers' => $sales['activeOffers'] ?? [],
+        ], JSON_UNESCAPED_UNICODE) ?: 'not available.';
+    }
+
     /** @param  array<string, mixed>  $input */
     private function need(array $input, string $key, string $message): string
     {
@@ -293,19 +426,5 @@ class AiAssistantService
         }
 
         return '';
-    }
-
-    /**
-     * Where the monthly counts live: the limiter store (file in production,
-     * where the default cache is `null` and would forget every count).
-     */
-    private function counter(): Repository
-    {
-        return Cache::store(config('cache.limiter') ?: 'file');
-    }
-
-    private function usageKey(Business $business): string
-    {
-        return 'ai-usage:'.$business->id.':'.now()->format('Y-m');
     }
 }

@@ -42,6 +42,26 @@ class ConfigController extends Controller
             // Admin-configurable new-order alert sound for owners (null = built-in ding).
             'orderSoundUrl' => $this->settings->get('orderSoundUrl'),
             'ownerModules' => $ownerModules,
+            // How the public reaches the Listee team (website contact page, footer).
+            'support' => [
+                'email' => (string) $this->settings->get('supportEmail', 'info@listee.org'),
+                'phone' => (string) $this->settings->get('supportPhone', ''),
+            ],
+            // Play Store pages of the customer and vendor apps ('' = not set).
+            'apps' => [
+                'customerPlayStore' => (string) $this->settings->get('playStoreCustomerUrl', ''),
+                'vendorPlayStore' => (string) $this->settings->get('playStoreVendorUrl', ''),
+                // Version gates for the phone apps ('' = no gate).
+                'customer' => [
+                    'minVersion' => (string) $this->settings->get('customerAppMinVersion', ''),
+                    'latestVersion' => (string) $this->settings->get('customerAppLatestVersion', ''),
+                ],
+                'vendor' => [
+                    'minVersion' => (string) $this->settings->get('vendorAppMinVersion', ''),
+                    'latestVersion' => (string) $this->settings->get('vendorAppLatestVersion', ''),
+                ],
+                'updateMessage' => (string) $this->settings->get('appUpdateMessage', ''),
+            ],
             // Shop rewards (bill discount, come-back, loyalty steps, coupon codes).
             'rewardsEnabled' => FeatureFlag::isEnabled('owner_rewards', true),
             // Admin-set colours and fonts, applied app-wide on every device, plus

@@ -154,8 +154,13 @@ class AiAssistantTest extends TestCase
 
     public function test_monthly_limit_and_required_input(): void
     {
-        app(SettingService::class)->set(['aiEnabled' => true, 'aiProvider' => 'openai', 'openaiApiKey' => 'sk-test', 'aiMonthlyLimit' => 1]);
+        app(SettingService::class)->set(['aiEnabled' => true, 'aiProvider' => 'openai', 'openaiApiKey' => 'sk-test']);
         $this->aiInFreePlan();
+        // The limit lives on the plan now.
+        $this->as(User::factory()->admin()->create())
+            ->patchJson('/api/v1/admin/plans/free', ['aiAnswersPerMonth' => 1])
+            ->assertOk()
+            ->assertJsonPath('data.limits.aiAnswersPerMonth', 1);
         $this->fakeOpenAi();
         [$owner] = $this->shop();
 

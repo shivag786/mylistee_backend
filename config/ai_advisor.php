@@ -43,4 +43,13 @@ return [
 
     // "Refresh suggestions" by the owner: per shop, per kind, per day.
     'manual_refresh_per_day' => 3,
+
+    // The AI sales manager bubble (AiCoachService). Its tips cost no AI
+    // tokens; these only ration how often it speaks up by itself.
+    'coach' => [
+        'nudges_per_day' => (int) env('AI_COACH_NUDGES_PER_DAY', 2),
+        'nudge_gap_hours' => (int) env('AI_COACH_NUDGE_GAP_HOURS', 4),
+        'repeat_after_days' => 3,
+        'snooze_hours' => 24,
+    ],
 ];

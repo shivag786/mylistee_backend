@@ -73,6 +73,13 @@ class SettingController extends Controller
             'brandName' => ['sometimes', 'string', 'max:60'],
             'supportEmail' => ['sometimes', 'nullable', 'email', 'max:120'],
             'supportPhone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'playStoreCustomerUrl' => ['sometimes', 'nullable', 'url:https', 'max:255'],
+            'playStoreVendorUrl' => ['sometimes', 'nullable', 'url:https', 'max:255'],
+            'customerAppMinVersion' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^(\d+\.\d+(\.\d+)?)?$/'],
+            'customerAppLatestVersion' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^(\d+\.\d+(\.\d+)?)?$/'],
+            'vendorAppMinVersion' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^(\d+\.\d+(\.\d+)?)?$/'],
+            'vendorAppLatestVersion' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^(\d+\.\d+(\.\d+)?)?$/'],
+            'appUpdateMessage' => ['sometimes', 'nullable', 'string', 'max:300'],
             'currency' => ['sometimes', 'string', 'max:3'],
             'timezone' => ['sometimes', 'string', 'max:64'],
             'defaultLanguage' => ['sometimes', 'string', 'max:8'],
@@ -135,7 +142,7 @@ class SettingController extends Controller
             'homeLayout.*.slot' => ['nullable', Rule::in(SettingService::HOME_SLOTS)],
 
             // Which page `/` shows signed-out visitors, and the landing page's content
-            'homePage' => ['sometimes', Rule::in(['shops', 'landing'])],
+            'homePage' => ['sometimes', Rule::in(['shops', 'landing', 'join'])],
             'landingPage' => ['sometimes', 'nullable', 'array'],
             'landingPage.sections' => ['sometimes', 'array', 'max:'.count(SettingService::LANDING_SECTIONS)],
             'landingPage.sections.*.id' => ['required', 'distinct', Rule::in(SettingService::LANDING_SECTIONS)],

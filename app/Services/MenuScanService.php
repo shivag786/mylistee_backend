@@ -94,8 +94,9 @@ class MenuScanService
         $system = 'You read restaurant and shop menus from photos for Listee, an Indian local-shop app. '
             .'Copy what is printed — never invent dishes, prices or descriptions. Reply with JSON only.';
 
-        $content = $this->ai->askGemini($system, $parts, temperature: 0.1, timeout: 120);
-        $json = $this->ai->decodeJson($content);
+        // Long menus (thalis, combos with every item listed) need a big answer.
+        $content = $this->ai->askGemini($system, $parts, temperature: 0.1, timeout: 150, maxOutputTokens: 32768);
+        $json = $this->ai->decodeJson($content) ?? $this->salvage($content);
         $raw = $json['items'] ?? (is_array($json) && array_is_list($json) ? $json : null);
 
         $items = $this->normalize(is_array($raw) ? $raw : [], $business);
@@ -105,6 +106,7 @@ class MenuScanService
         }
 
         $this->counter()->put($this->usageKey($business), $this->usedThisMonth($business) + 1, now()->endOfMonth()->addDay());
+        $this->ai->record($business, 'menu_scan', 'scan');
 
         return $items;
     }
@@ -187,8 +189,14 @@ class MenuScanService
             .'"category" (the menu section heading it sits under, e.g. "Starters", "Beverages"; null if none), '
             .'"price" (number in rupees, no symbol; null if the item only has size prices), '
             .'"variants" (sizes or portions with their own price, e.g. [{"name":"Half","price":120},{"name":"Full","price":200}]; [] if one price), '
-            .'"description" (only if a description is printed; else null), '
+            .'"description" (the full text printed for the item, word for word, nothing cut short; else null), '
             .'"foodType" ("veg" for a green mark or veg section, "non_veg" for a red/brown mark or meat/fish, "egg" for egg dishes; null if unclear). '
+            .'THALIS, COMBOS, MEALS, PLATTERS AND BUFFETS: these are ONE item with one price. Everything printed as part of it '
+            .'(lines under it, bullet points, items in brackets, "includes …", "served with …") goes into its "description" '
+            .'as one clean comma-separated list with the quantities as printed, e.g. "4 Butter Roti, Dal Makhani, Paneer Butter Masala, '
+            .'Mix Veg, Jeera Rice, Raita, Salad, Papad, Gulab Jamun". Never list those parts as separate dishes and never drop any of them. '
+            .'If a thali or combo comes in versions (e.g. Mini / Regular / Special) with different contents, make each version its own item '
+            .'with its own description. Keep notes like "unlimited", "chef special" or "ask for the sabzi of the day" in the description. '
             .'Skip taxes, phone numbers, timings, addresses and offers text. '
             .($sections !== [] ? 'The shop already uses these sections, reuse them when they fit: '.implode(', ', array_slice($sections, 0, 30)).'. ' : '')
             .'Shape: {"items":[{"name":"Paneer Tikka","category":"Starters","price":180,"variants":[],"description":null,"foodType":"veg"}]}';
@@ -233,7 +241,7 @@ class MenuScanService
                 'name' => $name,
                 'category' => $category !== '' ? mb_substr($category, 0, 80) : null,
                 'price' => $price ?? ($variants !== [] ? min(array_column($variants, 'price')) : null),
-                'description' => filled($row['description'] ?? null) ? mb_substr(trim((string) $row['description']), 0, 300) : null,
+                'description' => $this->cleanDescription($row['description'] ?? null),
                 'foodType' => FoodType::tryFrom((string) ($row['foodType'] ?? ''))?->value,
                 'variants' => count($variants) > 1 ? $variants : [],
                 'exists' => $existing->has($this->key($name)),
@@ -244,6 +252,51 @@ class MenuScanService
         }
 
         return $out;
+    }
+
+    /** One tidy line: list items, bullets and line breaks become ", ". */
+    private function cleanDescription(mixed $value): ?string
+    {
+        if (! is_string($value) && ! is_array($value)) {
+            return null;
+        }
+        $text = is_array($value) ? implode(', ', array_filter(array_map(fn ($v) => is_scalar($v) ? (string) $v : '', $value))) : $value;
+        $text = preg_replace('/\s*[\r\n]+\s*[-•*·]?\s*/u', ', ', trim($text)) ?? $text;
+        $text = preg_replace('/^[-•*·]\s*/u', '', $text) ?? $text;
+        $text = preg_replace('/\s{2,}/u', ' ', $text) ?? $text;
+        $text = preg_replace('/(,\s*){2,}/u', ', ', $text) ?? $text;
+        $text = trim($text, ' ,');
+
+        return $text === '' ? null : mb_substr($text, 0, 1000);
+    }
+
+    /**
+     * A menu so long the answer was cut off mid-list: keep every item that
+     * arrived complete instead of losing the whole scan.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function salvage(string $content): ?array
+    {
+        $start = strpos($content, '[');
+        if ($start === false) {
+            return null;
+        }
+        $end = strlen($content);
+        for ($tries = 0; $tries < 400; $tries++) {
+            $end = strrpos(substr($content, 0, $end), '}');
+            if ($end === false || $end < $start) {
+                return null;
+            }
+            $items = json_decode(substr($content, $start, $end - $start + 1).']', true);
+            if (is_array($items) && $items !== []) {
+                Log::info('Menu scan answer was cut off; kept the complete items', ['items' => count($items)]);
+
+                return ['items' => $items];
+            }
+        }
+
+        return null;
     }
 
     /** "₹1,250/-" → 1250.0; null when there is no usable number. */

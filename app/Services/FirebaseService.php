@@ -114,39 +114,64 @@ class FirebaseService
      */
     public function sendToTokens(array $tokens, string $title, string $body, array $data = []): array
     {
+        return $this->multicast($tokens, $title, $body, $data)['invalid'];
+    }
+
+    /**
+     * Push to any number of device tokens (Firebase takes 500 per call, so
+     * they go in batches) and report how it went. Never throws.
+     *
+     * @param  list<string>  $tokens
+     * @param  array<string, string>  $data
+     * @return array{sent: int, failed: int, invalid: list<string>}
+     */
+    public function multicast(array $tokens, string $title, string $body, array $data = []): array
+    {
+        $result = ['sent' => 0, 'failed' => 0, 'invalid' => []];
         $messaging = $this->messaging();
+        $tokens = array_values(array_unique(array_filter($tokens)));
 
         if ($messaging === null || $tokens === []) {
-            return [];
+            return $result;
         }
 
-        try {
-            // Data-only on purpose. With a `notification` block the Firebase web
-            // SDK shows the push itself AND our service worker shows it again
-            // (two notifications), and the SDK's copy ignores data.link on tap.
-            // So title/body travel in data and firebase-messaging-sw.js shows it
-            // once, opening data.link. Urgency high: deliver to a sleeping phone now.
-            $message = CloudMessage::new()
-                ->withData(array_merge($data, ['title' => $title, 'body' => $body]))
-                ->withWebPushConfig(['headers' => ['Urgency' => 'high', 'TTL' => '86400']]);
+        // Data-only on purpose. With a `notification` block the Firebase web
+        // SDK shows the push itself AND our service worker shows it again
+        // (two notifications), and the SDK's copy ignores data.link on tap.
+        // So title/body travel in data and firebase-messaging-sw.js (web) or
+        // the app's background handler (Android) shows it once, opening
+        // data.link. High priority on both: a data-only message at normal
+        // priority waits until a sleeping (Doze) Android phone wakes up.
+        $message = CloudMessage::new()
+            ->withData(array_merge($data, ['title' => $title, 'body' => $body]))
+            ->withAndroidConfig(['priority' => 'high', 'ttl' => '86400s'])
+            ->withWebPushConfig(['headers' => ['Urgency' => 'high', 'TTL' => '86400']]);
 
-            $report = $messaging->sendMulticast($message, $tokens);
+        foreach (array_chunk($tokens, 500) as $batch) {
+            try {
+                $report = $messaging->sendMulticast($message, $batch);
+                $result['sent'] += $report->successes()->count();
+                $result['failed'] += $report->failures()->count();
 
-            if ($report->hasFailures()) {
-                Log::info('FCM push partly failed', [
-                    'sent' => $report->successes()->count(),
-                    'failed' => $report->failures()->count(),
-                    'error' => ($report->failures()->getItems()[0] ?? null)?->error()?->getMessage(),
-                ]);
+                if ($report->hasFailures()) {
+                    Log::info('FCM push partly failed', [
+                        'sent' => $report->successes()->count(),
+                        'failed' => $report->failures()->count(),
+                        'error' => ($report->failures()->getItems()[0] ?? null)?->error()?->getMessage(),
+                    ]);
+                }
+
+                // Unknown = app removed / token expired; invalid = malformed. Neither
+                // will ever work again, so the caller deletes them.
+                array_push($result['invalid'], ...$report->unknownTokens(), ...$report->invalidTokens());
+            } catch (\Throwable $e) {
+                $result['failed'] += count($batch);
+                Log::warning('FCM push failed', ['error' => $e->getMessage()]);
             }
-
-            // Unknown = app removed / token expired; invalid = malformed. Neither
-            // will ever work again, so the caller deletes them.
-            return array_values(array_unique([...$report->unknownTokens(), ...$report->invalidTokens()]));
-        } catch (\Throwable $e) {
-            Log::warning('FCM push failed', ['error' => $e->getMessage()]);
-
-            return [];
         }
+
+        $result['invalid'] = array_values(array_unique($result['invalid']));
+
+        return $result;
     }
 }

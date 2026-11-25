@@ -81,7 +81,7 @@ return [
                 'business.customers.*', 'business.followers.*', 'business.reviews.*', 'business.promotions.*',
                 'business.rewards.*', 'business.coupons.*', 'business.loyalty.*', 'business.offers.*',
                 'business.push.*', 'business.whatsapp.*', 'business.reels.*', 'business.redeem', 'business.redeem.*',
-                'business.redemptions', 'business.ai.*', 'business.qr.*',
+                'business.redemptions', 'business.ai.*', 'business.coach.*', 'business.qr.*',
             ],
         ],
         'alerts' => [

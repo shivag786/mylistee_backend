@@ -113,6 +113,8 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::get('config', [ConfigController::class, 'index'])->name('config.index');
     // Landing page: live shop, city and category counts.
     Route::get('landing/stats', \App\Http\Controllers\Api\V1\LandingStatsController::class)->name('landing.stats');
+    // Website contact form (no account). Throttled; a honeypot drops bots.
+    Route::post('enquiries', [\App\Http\Controllers\Api\V1\EnquiryController::class, 'store'])->middleware('throttle:5,1')->name('enquiries.store');
     Route::get('banners', [\App\Http\Controllers\Api\V1\BannerController::class, 'index'])->name('banners.index');
 
     // Razorpay server-to-server webhook. Unauthenticated by necessity — the HMAC
@@ -299,6 +301,16 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
                 ->name('ai.advisor.approve');
             Route::post('ai/advisor/{uuid}/dismiss', [\App\Http\Controllers\Api\V1\Business\AiAdvisorController::class, 'dismiss'])->name('ai.advisor.dismiss');
 
+            // AI sales manager bubble: free tips for every shop (no AI call) and
+            // rationed nudges. Outside the `ai` section on purpose — shops without
+            // the module still see it (with an "unlock" prompt).
+            Route::get('coach', [\App\Http\Controllers\Api\V1\Business\AiCoachController::class, 'show'])
+                ->middleware('throttle:30,1')
+                ->name('coach.show');
+            Route::post('coach/nudge', [\App\Http\Controllers\Api\V1\Business\AiCoachController::class, 'nudge'])
+                ->middleware('throttle:30,1')
+                ->name('coach.nudge');
+
             // AI menu scan: photos / PDF of the menu → dishes to review → products.
             // Every shop gets it (it is how a new shop fills its menu); own monthly cap.
             Route::get('menu-scan', [\App\Http\Controllers\Api\V1\Business\MenuScanController::class, 'show'])->name('menu-scan.show');
@@ -329,6 +341,15 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             Route::post('subscription/payment-failed', [SubscriptionPaymentController::class, 'failed'])
                 ->middleware('throttle:20,1')
                 ->name('subscription.payment-failed');
+
+            // AI add-on packs (owner only): extra AI answers bought with Razorpay.
+            Route::get('ai-credits', [\App\Http\Controllers\Api\V1\Business\AiCreditController::class, 'show'])->name('ai-credits.show');
+            Route::post('ai-credits/checkout', [\App\Http\Controllers\Api\V1\Business\AiCreditController::class, 'checkout'])
+                ->middleware('throttle:10,1')
+                ->name('ai-credits.checkout');
+            Route::post('ai-credits/verify', [\App\Http\Controllers\Api\V1\Business\AiCreditController::class, 'verify'])
+                ->middleware('throttle:20,1')
+                ->name('ai-credits.verify');
 
             // Personal link — store mode, free and never expiring: just a switch.
             Route::get('personal-link', [\App\Http\Controllers\Api\V1\Business\PersonalLinkController::class, 'show'])->name('personal-link.show');
@@ -578,6 +599,15 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
 
             // Broadcast notifications
             Route::post('broadcast', [BroadcastController::class, 'store'])->name('broadcast');
+            Route::get('broadcast', [BroadcastController::class, 'index'])->name('broadcast.index');
+            Route::get('broadcast/preview', [BroadcastController::class, 'preview'])->name('broadcast.preview');
+
+            // Insight pages: subscriptions, vendor health, QR scans.
+            Route::get('subscriptions', [\App\Http\Controllers\Api\V1\Admin\InsightsController::class, 'subscriptions'])->name('subscriptions.index');
+            Route::get('vendor-health', [\App\Http\Controllers\Api\V1\Admin\InsightsController::class, 'vendorHealth'])->name('vendor-health');
+            Route::get('qr-scans', [\App\Http\Controllers\Api\V1\Admin\InsightsController::class, 'qrScans'])->name('qr-scans');
+            Route::get('enquiries', [\App\Http\Controllers\Api\V1\EnquiryController::class, 'index'])->name('enquiries.index');
+            Route::patch('enquiries/{uuid}', [\App\Http\Controllers\Api\V1\EnquiryController::class, 'update'])->name('enquiries.update');
 
             // Homepage advertisement banners
             Route::get('banners', [\App\Http\Controllers\Api\V1\Admin\BannerController::class, 'index'])->name('banners.index');
@@ -591,6 +621,15 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
             // Feature flags + platform settings + CMS
             Route::get('feature-flags', [FeatureFlagController::class, 'index'])->name('flags.index');
             Route::patch('feature-flags/{key}', [FeatureFlagController::class, 'update'])->name('flags.update');
+            // AI usage (who uses how much), AI add-on packs, ideas per answer.
+            Route::prefix('ai')->name('ai.')->controller(\App\Http\Controllers\Api\V1\Admin\AiCreditAdminController::class)->group(function (): void {
+                Route::get('/', 'index')->name('index');
+                Route::put('settings', 'settings')->name('settings');
+                Route::post('packs', 'storePack')->name('packs.store');
+                Route::patch('packs/{uuid}', 'updatePack')->name('packs.update');
+                Route::delete('packs/{uuid}', 'destroyPack')->name('packs.destroy');
+                Route::post('credits', 'grant')->name('credits.grant');
+            });
             Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
             // The Listee Business phone app's colours + splash time.
             Route::get('vendor-app-theme', [\App\Http\Controllers\Api\V1\Admin\VendorAppThemeController::class, 'show'])->name('vendor-app-theme.show');

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Services\AiCreditService;
 use App\Services\OrderPaymentService;
 use App\Services\PersonalLinkService;
 use App\Services\RazorpayService;
@@ -36,6 +37,7 @@ class RazorpayWebhookController extends Controller
         private readonly SubscriptionPaymentService $payments,
         private readonly OrderPaymentService $orderPayments,
         private readonly PersonalLinkService $personalLinks,
+        private readonly AiCreditService $aiCredits,
     ) {}
 
     /** POST /webhooks/razorpay */
@@ -63,6 +65,9 @@ class RazorpayWebhookController extends Controller
             $result = $this->orderPayments->handleWebhook($payload);
             if ($result === 'not_ours') {
                 $result = $this->personalLinks->handleWebhook($payload);
+            }
+            if ($result === 'not_ours') {
+                $result = $this->aiCredits->handleWebhook($payload);
             }
             if ($result === 'not_ours') {
                 $result = $this->payments->handleWebhook($payload);

@@ -151,6 +151,37 @@ class MenuScanTest extends TestCase
         $this->assertSame(1, $business->productCategories()->where('name', 'Breads')->count());
     }
 
+    public function test_import_keeps_same_names_in_different_sections_and_hindi_names(): void
+    {
+        [$owner, $business] = $this->shop();
+
+        $items = [
+            ['name' => 'Veg', 'category' => 'Steamed Momos', 'price' => 60],
+            ['name' => 'Paneer', 'category' => 'Steamed Momos', 'price' => 80],
+            ['name' => 'Veg', 'category' => 'Fried Momos', 'price' => 70],
+            ['name' => 'Paneer', 'category' => 'fried momos ', 'price' => 90],
+            ['name' => 'पनीर टिक्का', 'category' => 'स्टार्टर', 'price' => 180],
+            ['name' => 'दाल मखनी', 'category' => 'मेन कोर्स', 'price' => 160],
+            ['name' => 'आलू पराठा', 'category' => 'मेन कोर्स', 'price' => 50],
+        ];
+
+        $this->as($owner)->postJson('/api/v1/business/menu-scan/import', ['items' => $items])
+            ->assertCreated()
+            ->assertJsonPath('data.created', 7)
+            ->assertJsonPath('data.skipped', 0);
+
+        // "Fried Momos" and "fried momos " are one section.
+        $this->assertSame(1, $business->productCategories()->whereRaw('LOWER(TRIM(name)) = ?', ['fried momos'])->count());
+        $this->assertSame(4, $business->productCategories()->count());
+
+        // Scanning the same menu again: every dish is now "already on menu".
+        $this->as($owner)->postJson('/api/v1/business/menu-scan/import', ['items' => $items])
+            ->assertOk()
+            ->assertJsonPath('data.created', 0)
+            ->assertJsonPath('data.skipped', 7)
+            ->assertJsonCount(7, 'data.skippedNames');
+    }
+
     public function test_off_limit_and_bad_files(): void
     {
         [$owner] = $this->shop();

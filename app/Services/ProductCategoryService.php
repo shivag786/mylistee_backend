@@ -35,10 +35,17 @@ class ProductCategoryService
             return null;
         }
 
-        return $business->productCategories()->firstOrCreate(
-            ['name' => $name],
-            ['position' => (int) $business->productCategories()->max('position') + 1],
-        );
+        // "Starters", "starters " and "STARTERS" are one section, not three.
+        $norm = fn (string $n) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($n)) ?? $n);
+        $match = $business->productCategories()->get()->first(fn ($c) => $norm((string) $c->name) === $norm($name));
+        if ($match !== null) {
+            return $match;
+        }
+
+        return $business->productCategories()->create([
+            'name' => $name,
+            'position' => (int) $business->productCategories()->max('position') + 1,
+        ]);
     }
 
     public function update(ProductCategory $category, string $name): ProductCategory

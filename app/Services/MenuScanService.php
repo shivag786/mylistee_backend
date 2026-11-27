@@ -116,13 +116,14 @@ class MenuScanService
      * Stops cleanly at the plan's product limit.
      *
      * @param  list<array<string, mixed>>  $items  validated rows from the review screen
-     * @return array{created: int, skipped: int, failed: list<array{name: string, reason: string}>, limitReached: bool}
+     * @return array{created: int, skipped: int, skippedNames: list<string>, failed: list<array{name: string, reason: string}>, limitReached: bool}
      */
     public function import(Business $business, User $actor, array $items, bool $skipExisting = true): array
     {
-        $existing = $business->products()->pluck('name')->map(fn ($n) => $this->key((string) $n))->flip();
+        $existing = $this->existingKeys($business);
         $created = 0;
         $skipped = 0;
+        $skippedNames = [];
         $failed = [];
         $limitReached = false;
 
@@ -131,8 +132,12 @@ class MenuScanService
             if ($name === '') {
                 continue;
             }
-            if ($skipExisting && $existing->has($this->key($name))) {
+            // Same dish name in another section ("Veg" under Steamed and under
+            // Fried) is a different dish: only name + section counts as a repeat.
+            $section = (string) ($row['category'] ?? '');
+            if ($skipExisting && $this->isExisting($existing, $name, $section)) {
                 $skipped++;
+                $skippedNames[] = $name;
 
                 continue;
             }
@@ -159,7 +164,7 @@ class MenuScanService
 
             try {
                 DB::transaction(fn () => $this->products->create($business, $data, null, $actor));
-                $existing->put($this->key($name), true);
+                $existing[$this->key($name)][] = $this->key(trim($section));
                 $created++;
             } catch (ValidationException $e) {
                 // The plan's product limit: everything after this would fail too.
@@ -174,7 +179,7 @@ class MenuScanService
             }
         }
 
-        return ['created' => $created, 'skipped' => $skipped, 'failed' => $failed, 'limitReached' => $limitReached];
+        return ['created' => $created, 'skipped' => $skipped, 'skippedNames' => $skippedNames, 'failed' => $failed, 'limitReached' => $limitReached];
     }
 
     private function prompt(Business $business, int $pages): string
@@ -208,7 +213,7 @@ class MenuScanService
      */
     private function normalize(array $raw, Business $business): array
     {
-        $existing = $business->products()->pluck('name')->map(fn ($n) => $this->key((string) $n))->flip();
+        $existing = $this->existingKeys($business);
         $seen = [];
         $out = [];
 
@@ -244,7 +249,7 @@ class MenuScanService
                 'description' => $this->cleanDescription($row['description'] ?? null),
                 'foodType' => FoodType::tryFrom((string) ($row['foodType'] ?? ''))?->value,
                 'variants' => count($variants) > 1 ? $variants : [],
-                'exists' => $existing->has($this->key($name)),
+                'exists' => $this->isExisting($existing, $name, $category),
             ];
             if (count($out) >= self::MAX_ITEMS) {
                 break;
@@ -319,9 +324,47 @@ class MenuScanService
         return in_array($mime, self::MIME_TYPES, true) ? $mime : 'image/jpeg';
     }
 
+    /**
+     * Compare names loosely: case, spaces and punctuation ignored. Letters of
+     * every script count — the old a-z-only version turned every Hindi name
+     * into "" so all of them looked like one dish.
+     */
     private function key(string $name): string
     {
-        return Str::lower(preg_replace('/[^a-z0-9]+/i', '', $name) ?? $name);
+        return mb_strtolower(preg_replace('/[^\p{L}\p{N}]+/u', '', $name) ?? $name);
+    }
+
+    /**
+     * Already on the menu? Same name in the same section — or the same name
+     * where either side has no section (a dish added by hand without one).
+     * "Veg" under Steamed and "Veg" under Fried are two different dishes.
+     *
+     * @param  array<string, list<string>>  $existing
+     */
+    private function isExisting(array $existing, string $name, ?string $section): bool
+    {
+        $sections = $existing[$this->key($name)] ?? null;
+        if ($sections === null) {
+            return false;
+        }
+        $sec = $this->key(trim((string) $section));
+
+        return $sec === '' || in_array('', $sections, true) || in_array($sec, $sections, true);
+    }
+
+    /**
+     * name => sections of every product already on the shop's menu.
+     *
+     * @return array<string, list<string>>
+     */
+    private function existingKeys(Business $business): array
+    {
+        $map = [];
+        foreach ($business->products()->with('category:id,name')->get(['id', 'name', 'product_category_id']) as $p) {
+            $map[$this->key((string) $p->name)][] = $this->key(trim((string) $p->category?->name));
+        }
+
+        return $map;
     }
 
     /**

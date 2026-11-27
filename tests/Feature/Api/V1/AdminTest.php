@@ -244,6 +244,27 @@ class AdminTest extends TestCase
         $this->withToken($token)->getJson('/api/v1/admin/qr-scans?days=7')->assertOk()->assertJsonCount(7, 'data.series');
     }
 
+    public function test_admin_can_change_owner_login_mobile(): void
+    {
+        $owner = User::factory()->create(['role' => UserRole::BusinessOwner, 'phone' => '9000000099', 'pin' => '4321']);
+        $shop = \App\Models\Business::factory()->create(['owner_id' => $owner->id]);
+        User::factory()->create(['phone' => '9888888888']);
+        $token = $this->token($this->admin());
+
+        $this->withToken($token)->putJson('/api/v1/admin/businesses/'.$shop->uuid, ['name' => $shop->name, 'owner_mobile' => '9888888888'])
+            ->assertStatus(422)->assertJsonValidationErrors('owner_mobile');
+        $this->withToken($token)->putJson('/api/v1/admin/businesses/'.$shop->uuid, ['name' => $shop->name, 'owner_mobile' => '12345'])
+            ->assertStatus(422);
+
+        $this->withToken($token)->putJson('/api/v1/admin/businesses/'.$shop->uuid, ['name' => $shop->name, 'owner_mobile' => '9123456789'])
+            ->assertOk()
+            ->assertJsonPath('data.ownerMobile', '9123456789');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'business.owner_mobile']);
+
+        // The owner signs in with the new number and the same PIN.
+        $this->postJson('/api/v1/auth/pin-login', ['identifier' => '9123456789', 'pin' => '4321'])->assertOk();
+    }
+
     public function test_website_enquiry_reaches_admins(): void
     {
         $admin = $this->admin();

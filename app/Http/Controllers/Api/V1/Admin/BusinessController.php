@@ -100,9 +100,20 @@ class BusinessController extends Controller
             'opening_time' => ['nullable', 'date_format:H:i'],
             'closing_time' => ['nullable', 'date_format:H:i'],
             'status' => ['nullable', Rule::enum(BusinessStatus::class)],
+            // The mobile number the owner signs in with (not the shop's display phone).
+            'owner_mobile' => [
+                'nullable', 'string', 'digits:10', 'regex:/^[6-9]\d{9}$/',
+                Rule::unique('users', 'phone')->ignore($business->owner_id),
+            ],
+        ], [
+            'owner_mobile.digits' => 'Enter a 10-digit mobile number.',
+            'owner_mobile.regex' => 'Enter a valid Indian mobile number.',
+            'owner_mobile.unique' => 'Another account already uses this mobile number.',
         ]);
 
         $attributes = $validated;
+        $newMobile = $attributes['owner_mobile'] ?? null;
+        unset($attributes['owner_mobile']);
         if (array_key_exists('category_id', $attributes)) {
             $attributes['category_id'] = $attributes['category_id']
                 ? BusinessCategory::where('uuid', $attributes['category_id'])->value('id')
@@ -111,6 +122,21 @@ class BusinessController extends Controller
 
         $business->update($attributes);
         $this->audit->log($request->user(), 'business.update', $business, "Updated business {$business->name}");
+
+        // Change the owner's login mobile. They sign in with the new number and
+        // the same PIN from now on.
+        $owner = $business->owner;
+        if ($newMobile !== null && $owner !== null && $owner->phone !== $newMobile) {
+            $old = $owner->phone;
+            $owner->forceFill(['phone' => $newMobile])->save();
+            $this->audit->log(
+                $request->user(),
+                'business.owner_mobile',
+                $business,
+                "Changed owner login mobile for {$business->name}",
+                ['from' => $old, 'to' => $newMobile],
+            );
+        }
 
         return ApiResponse::success(
             new AdminBusinessResource($business->fresh(['owner', 'category'])),

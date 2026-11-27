@@ -54,6 +54,12 @@ class BusinessResource extends JsonResource
             // Which vendor-app tools apply (kitchen screen for food & bakery).
             'businessType' => $this->businessType()->value,
             'kitchenEnabled' => $this->usesKitchen(),
+            // Can customers pay this shop online right now? Plan allows it, the
+            // gateway is connected and the admin has not hidden it. The owner
+            // panel shows "you get online ₹x" only when this is true.
+            'onlinePayAvailable' => app(\App\Services\PlanAccessService::class)->allows($this->resource, 'pay_online')
+                && app(\App\Services\RazorpayService::class)->isConfigured()
+                && ! $this->online_pay_hidden,
             'setupMissing' => $this->setup_completed_at !== null ? [] : $this->setupMissing(),
             'verified' => $this->verified,
             'featured' => $this->featured,
